@@ -1,0 +1,56 @@
+{
+  "schema_version": 2,
+  "required_capabilities": ["custom_pages", "structured_arguments"],
+  "workspace_title": "回响",
+  "pages": [
+    {
+      "id": "console",
+      "title": "回响 · 后台管理",
+      "description": "全中文后台：看运行状态、额度、熔断、分区目录和最近操作，也能手动触发一轮浏览。",
+      "placement": "workspace",
+      "icon": "chart",
+      "mode": "custom",
+      "entry": "webui/控制台.html",
+      "layout": "document",
+      "queries": {
+        "overview": { "api": "hx_overview", "version": "1", "parameters": {} },
+        "action_log": {
+          "api": "hx_action_log",
+          "version": "1",
+          "parameters": {
+            "limit": { "type": "integer", "required": false, "minimum": 1, "maximum": 200 }
+          }
+        },
+        "login_status": { "api": "hx_login_status", "version": "1", "parameters": {} },
+        "config_schema": { "api": "hx_config_schema", "version": "1", "parameters": {} },
+        "get_config": { "api": "hx_get_config", "version": "1", "parameters": {} }
+      },
+      "actions": {
+        "browse_now": { "api": "hx_browse_now", "version": "1", "parameters": {} },
+        "test_model": { "api": "hx_test_model", "version": "1", "parameters": {} },
+        "preview_summary": { "api": "hx_preview_summary", "version": "1", "parameters": {} },
+        "save_config": {
+          "api": "hx_save_config",
+          "version": "1",
+          "parameters": {
+            "sections": { "type": "string", "required": true, "max_length": 60000 }
+          },
+          "confirmation": "确认保存配置？保存后会立即生效。"
+        },
+        "request_qr": { "api": "hx_request_qr", "version": "1", "parameters": {} },
+        "logout": {
+          "api": "hx_logout",
+          "version": "1",
+          "parameters": {},
+          "confirmation": "确认退出小黑盒登录？退出后需要重新扫码。"
+        },
+        "reset_circuit": {
+          "api": "hx_reset_circuit",
+          "version": "1",
+          "parameters": {},
+          "confirmation": "确认解除验证码熔断并恢复当日动作？"
+        }
+      }
+    }
+  ]
+}

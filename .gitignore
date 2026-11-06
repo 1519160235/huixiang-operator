@@ -1,0 +1,6 @@
+__pycache__/
+*.pyc
+.gh_token
+.git/
+*.bak
+credentials.json

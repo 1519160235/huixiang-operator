@@ -1,0 +1,113 @@
+# ============================================================
+# 回响（local.huixiang-operator）插件配置
+# 默认 enabled=false、mode="dry_run"：先不启用、先演练。
+#
+# 【重要·历史踩坑】[plugin] 段必须放在文件最后！
+# TOML 规则：段头之后的所有裸键都归属该段。若把 [plugin] 放在开头，
+# 后面的顶层字段会被错误归入 [plugin]，框架读不到配置、全部退回默认值。
+# 因此：所有业务段一律写在 [plugin] 之前，[plugin] 只留 config_version。
+#
+# 【真机坑】[plugin] 段不仅要写在这里，还必须由配置模型定义
+# （config_model.PluginSection）。否则 SDK 生成默认配置时直接抛
+# PluginConfigVersionError，插件加载失败。
+# ============================================================
+
+# ---- [basic] 基础：启用 / 运行模式 / 资料档 ----
+[basic]
+enabled = true
+mode = "演练"
+profile_id = ""
+
+# ---- [model] 模型：写内容用哪个模型 ----
+# 这里的值就是服务器 model_config.toml 里 [models] 的 name。
+# 留空或写「跟随宿主默认」= 不指定，用 replyer 任务里的第一个模型
+# （本机那条任务第一位是 ds-official = DeepSeek，所以想要别的模型必须显式写）。
+[model]
+text_model = "feiyu-gemini-flash"
+temperature = 1.0
+max_tokens = 2048
+
+# ---- [login] 登录（凭证不进 config，存宿主数据目录）----
+[login]
+auto_login = false
+
+# ---- [browse] 自动浏览：分区动态拉取 + 定时刷新 ----
+[browse]
+enabled = true
+partition_mode = "全部分区"
+selected_partitions = []
+refresh_partitions_interval_minutes = 360
+browse_interval_seconds = 300
+posts_per_round = 10
+follow_partition_feed = false
+
+# ---- [interact] 互动：评论与 @/回复 ----
+[interact]
+comment_enabled = true
+comment_interval_seconds = 600
+max_comments_per_round = 3
+reply_mentions = true
+reply_replies = true
+
+# ---- [publish] 发布：默认分区 / 话题联动 / 回读核验 ----
+[publish]
+default_partition = ""
+linked_topics_enabled = true
+max_topics = 5
+custom_topics = []
+post_time_window = "09:00-22:00"
+post_interval_minutes = 30
+readback_verify = true
+
+# ---- [summarize] 感想总结发帖 ----
+[summarize]
+enabled = true
+trigger_by = "按帖数"
+count_threshold = 10
+time_hours = 24
+min_chars = 200
+max_chars = 400
+min_paragraphs = 2
+max_paragraphs = 4
+
+# ---- [image] AI 配图 ----
+[image]
+with_image = false
+image_count = 1
+image_api_base_url = ""
+image_api_key = ""
+image_model = ""
+
+# ---- [create] 创作：语气 / 段间排版 ----
+[create]
+tone = "平和"
+no_blank_line_between_paragraphs = true
+
+# ---- [sense] 生活感知 ----
+[sense]
+use_life_frequency = false
+pause_on_sleep = true
+social_battery_threshold = 40
+
+# ---- [guard] 护栏与额度 ----
+[guard]
+daily_quota_post = 3
+daily_quota_comment = 20
+daily_quota_like = 50
+daily_quota_reply = 15
+post_interval_minutes = 30
+de_ai_flavor = true
+ai_flavor_threshold = 60
+captcha_circuit_break = true
+dry_run_no_quota_cost = true
+
+# ---- [links] 外围联动 ----
+[links]
+voice_broadcast = false
+qzone_sync = false
+diary_link = false
+
+# ---- [plugin] 必须放最后，仅放 config_version ----
+# 注意：本段之后不要再写任何裸键，否则都会被归入本段。
+[plugin]
+config_version = "1.0.0"

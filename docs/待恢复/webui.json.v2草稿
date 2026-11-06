@@ -1,0 +1,41 @@
+{
+  "schema_version": 2,
+  "required_capabilities": ["custom_pages"],
+  "workspace_title": "回响",
+  "pages": [
+    {
+      "id": "overview",
+      "title": "回响 · 运营总览",
+      "description": "六块状态、今日额度（演练 / 真实两套）、熔断状态与操作记录。数据与 /回响状态、/回响记录 同源。",
+      "placement": "workspace",
+      "icon": "chart",
+      "mode": "custom",
+      "entry": "webui/控制台.html",
+      "layout": "document",
+      "queries": {
+        "overview": { "api": "webui_get_overview", "version": "1", "parameters": {} },
+        "quota": { "api": "webui_get_quota", "version": "1", "parameters": {} },
+        "action_log": {
+          "api": "webui_get_action_log",
+          "version": "1",
+          "parameters": {
+            "limit": { "type": "integer", "required": false, "minimum": 1, "maximum": 200 }
+          }
+        }
+      },
+      "actions": {
+        "refresh_partitions": {
+          "api": "webui_refresh_partitions",
+          "version": "1",
+          "parameters": {}
+        },
+        "reset_circuit": {
+          "api": "webui_reset_circuit",
+          "version": "1",
+          "parameters": {},
+          "confirmation": "确认解除验证码熔断并恢复当日动作？"
+        }
+      }
+    }
+  ]
+}
