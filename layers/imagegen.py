@@ -7,7 +7,8 @@
 【两条路径，按顺序尝试】
 1. 直连生图（优先）：OpenAI 兼容 `POST {base_url}/images/generations`。
    参数来自 `[image] image_api_base_url / image_api_key / image_model`；
-   三者留空则回退读 MaiBot 主配置 `model_config.toml` 里 `api_provider == "画图"` 的 provider。
+   地址与模型名留空时用 `defaults.py` 的内置中转站，key 必须自己填；
+   key 也留空则回退读 MaiBot 主配置 `model_config.toml` 里 `api_provider == "画图"` 的 provider。
 2. 麦麦绘图插件（回退）：走 `ctx.api.call("maimai-drawpic-plugin.*")`，
    submit → wait → read_image。
 
@@ -28,6 +29,7 @@ import urllib.request
 from pathlib import Path
 from typing import Any
 
+from defaults import DEFAULT_IMAGE_BASE_URL, DEFAULT_IMAGE_MODEL
 from layers._cfg import read as _read, section as _section
 
 logger = logging.getLogger(__name__)
@@ -259,25 +261,55 @@ def _unwrap_payload(value: object) -> object:
 # ===================== 参数解析与主流程 =====================
 
 def _image_cfg(ctx: Any) -> tuple[str, str, str, str]:
-    """从插件 [image] 段读 base_url / api_key / model / size（三种对象形态都认）。"""
+    """从插件 [image] 段读 base_url / api_key / model / size（三种对象形态都认）。
+
+    【2026-11-08】地址与模型名留空时用内置默认（`defaults.py` 里的中转站），
+    这样别人装完插件只填 key 就能出图，不用自己去翻该填什么地址。
+    key 不内置 —— 公开仓库里写死 key 会被刷爆，必须由使用者自己填。
+    如果连 key 都没填，`build_generator` 会返回 None，仍然回退宿主的「画图」配置。
+    """
     sec = _section(ctx, "image")
-    base = str(_read(sec, "image_api_base_url", "") or "").strip()
+    base = str(_read(sec, "image_api_base_url", "") or "").strip() or DEFAULT_IMAGE_BASE_URL
     key = str(_read(sec, "image_api_key", "") or "").strip()
-    model = str(_read(sec, "image_model", "") or "").strip()
+    model = str(_read(sec, "image_model", "") or "").strip() or DEFAULT_IMAGE_MODEL
     size = str(_read(sec, "image_size", "") or "").strip()
     return base, key, model, size
 
 
-def _main_config_candidates(ctx: Any) -> list[Path]:
-    """MaiBot 主配置 model_config.toml 的候选路径。"""
-    cands: list[Path] = [Path(r"E:\mai\config\model_config.toml")]
+def _config_candidates(ctx: Any, filename: str) -> list[Path]:
+    """找宿主配置文件的候选路径（model_config.toml / bot_config.toml）。
+
+    【2026-11-08】原来这两个函数各自写死了作者机器的安装路径，
+    别人装根本没有那个盘，回退路径等于永远失效。现在按环境变量、
+    数据目录向上回溯、进程工作目录三路推断，不再假设安装位置。
+    """
+    import os
+
+    cands: list[Path] = []
+    root_env = os.environ.get("MAIBOT_ROOT", "").strip()
+    if root_env:
+        cands.append(Path(root_env) / "config" / filename)
+    cfg_env = os.environ.get("MAIBOT_CONFIG_DIR", "").strip()
+    if cfg_env:
+        cands.append(Path(cfg_env) / filename)
+
     paths = getattr(ctx, "paths", None)
     data_dir = getattr(paths, "data_dir", None) or getattr(paths, "state_dir", None)
     if data_dir:
         d = Path(data_dir)
         for parent in (d, d.parent, d.parent.parent, d.parent.parent.parent):
-            cands.append(parent / "config" / "model_config.toml")
+            cands.append(parent / "config" / filename)
+    # 最后猜一下当前工作目录（宿主一般从安装根目录启动）。
+    try:
+        cands.append(Path.cwd() / "config" / filename)
+    except OSError:  # pragma: no cover
+        pass
     return cands
+
+
+def _main_config_candidates(ctx: Any) -> list[Path]:
+    """MaiBot 主配置 model_config.toml 的候选路径。"""
+    return _config_candidates(ctx, "model_config.toml")
 
 
 def _generator_from_main_config(ctx: Any) -> DirectImageGenerator | None:
@@ -375,15 +407,9 @@ def _bot_config_candidates(ctx: Any) -> list[Path]:
     【真机缺陷 2026-11-08】原来复用 `_main_config_candidates`，那是给生图 provider
     用的、只含 model_config.toml，于是 `[personality]` 永远读不到 ——
     用户明明配了「阿水」的人设，配图提示词里却只剩一个昵称。
+    路径推断与 `_main_config_candidates` 共用一套，不再写死安装位置。
     """
-    cands: list[Path] = [Path(r"E:\mai\config\bot_config.toml")]
-    paths = getattr(ctx, "paths", None)
-    data_dir = getattr(paths, "data_dir", None) or getattr(paths, "state_dir", None)
-    if data_dir:
-        d = Path(data_dir)
-        for parent in (d, d.parent, d.parent.parent, d.parent.parent.parent):
-            cands.append(parent / "config" / "bot_config.toml")
-    return cands
+    return _config_candidates(ctx, "bot_config.toml")
 
 
 def _persona_hint(ctx: Any) -> str:

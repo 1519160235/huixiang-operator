@@ -169,25 +169,33 @@ huixiang-operator/
 
 ### 配图用的生图接口
 
-配图需要一个 OpenAI 兼容的生图接口，填在 `[image]` 段：
+配图走 OpenAI 兼容接口，**地址和模型名已经内置**，开箱就是飞鱼中转的 `gpt-image-2.6`，装完只差一个 key：
 
 ```toml
 [image]
-image_api_base_url = "https://你的接口地址/v1"
-image_api_key = "sk-..."
-image_model = "gpt-image-2.6"
-image_size = "3840x2160"
+image_api_base_url = "https://ai.feiyuapi.top/v1"   # 已预填，一般不用改
+image_api_key = ""                                  # ← 只需要填这个
+image_model = "gpt-image-2.6"                       # 已预填，支持 4K
+image_size = "3840x2160"                            # 想要 4K 大图才填，留空用默认
 ```
 
-作者自己在用的是飞鱼中转，支持 `gpt-image-2.x` 系列、能出 4K，也提供文本模型：
+key 在这里注册后生成（作者在用的中转站，`gpt-image-2.x` 系列可出 4K）：
 
 > **https://ai.feiyuapi.top/register?aff=2U5HGJJJABLJ**
 >
 > 说明一下：这是带邀请码的注册链接，通过它注册，注册方和作者各得少量额度返还，
-> 不影响你实际付的钱。不感兴趣完全没关系 —— 任何 OpenAI 兼容接口都能用，
-> 改 `image_api_base_url` / `image_api_key` 就行，本地部署的接口也能接。
+> 不影响你实际付的钱。
 
-如果不配生图接口，把 `[image].with_image` 设为 `false`，发帖就只发文字。
+key 不随插件分发，原因很简单：仓库是公开的，写死 key 等于把额度敞开给所有人。
+
+不想用这个中转站也完全没问题 —— 任何 OpenAI 兼容接口都能接，改
+`image_api_base_url` / `image_model` 即可，本地部署的接口一样能跑。
+连 key 都不填也不会报错：插件会回退用 MaiBot 本体「画图」里配的模型。
+实在不想配图，把 `[image].with_image` 设为 `false`，发帖就只发文字。
+
+> 文本模型（写帖子、写评论）不在这里配，走的是 MaiBot 自己的模型设置：
+> 在 MaiBot 的模型管理里把服务商地址指向同一个中转站，
+> 插件 `[model].text_model` 的默认值 `feiyu-gemini-flash` 就对应它的模型名。
 
 ---
 

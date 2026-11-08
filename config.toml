@@ -66,12 +66,16 @@ readback_verify = true
 enabled = true
 
 # ---- [image] AI 配图 ----
+# 接口地址和模型名已预填作者在用的中转站，别人装完只要填自己的 key 就能出图。
+# key 不预填：这是公开仓库，写死 key 会被刷爆，得自己去注册一个。
 [image]
 with_image = true
 image_count = 1
-image_api_base_url = ""
+image_api_base_url = "https://ai.feiyuapi.top/v1"
 image_api_key = ""
-image_model = ""
+image_model = "gpt-image-2.6"
+# 想要 4K 就填 3840x2160；留空用模型默认尺寸。超过 5 MB 会自动压成 JPEG。
+image_size = ""
 
 # ---- [create] 创作：语气 / 段间排版 ----
 [create]

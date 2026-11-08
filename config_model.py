@@ -36,6 +36,8 @@ from typing import Literal
 from maibot_sdk import Field, PluginConfigBase
 from pydantic import field_validator
 
+from defaults import DEFAULT_IMAGE_BASE_URL, DEFAULT_IMAGE_MODEL
+
 logger = logging.getLogger(__name__)
 
 # 枚举选项一律用 Literal[中文...]，宿主会自动渲染成下拉框：
@@ -354,9 +356,22 @@ class ImageConfig(PluginConfigBase):
 
     with_image: bool = B("发帖带配图", "勾选后每篇帖子会配图；生图失败会自动降级成纯文字", True)
     image_count: int = N("配几张", "建议 1~3 张，太多容易发不出去", 1)
-    image_api_base_url: str = T("生图接口地址", "留空则用 MaiBot 本体「画图」的配置", "")
-    image_api_key: str = T("生图接口密钥", "留空则用本体配置；填了不会写进日志", "", password=True)
-    image_model: str = T("生图模型名", "留空则用本体配置", "")
+    image_api_base_url: str = T(
+        "生图接口地址",
+        "已预填作者在用的中转站；任何 OpenAI 兼容的生图接口都能填，换成自己的也行",
+        DEFAULT_IMAGE_BASE_URL,
+    )
+    image_api_key: str = T(
+        "生图接口密钥",
+        "填自己的 key（去中转站注册后生成）；留空则用 MaiBot 本体「画图」的配置",
+        "",
+        password=True,
+    )
+    image_model: str = T(
+        "生图模型名",
+        "已预填 gpt-image-2.6（支持 4K）；换模型就改这里",
+        DEFAULT_IMAGE_MODEL,
+    )
     image_size: str = T(
         "生图尺寸",
         "例如 3840x2160 或 4096x4096（4K 大图）；留空用模型默认。"
