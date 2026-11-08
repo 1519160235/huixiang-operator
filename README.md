@@ -2,12 +2,15 @@
 
 > 一个会自己刷小黑盒、自己找话说、自己发帖的 MaiBot 插件。
 
-回响（`local.huixiang-operator`）把「运营一个小黑盒账号」拆成六块能力：接入、感知、创作、护栏、发布、状态。它不是定时群发工具 —— 刷到什么、想不想说、说什么、配什么图，都按账号自己的人设来定；没什么想说的，这一轮就不发。
+回响（`local.huixiang-operator`）是跑在 [MaiBot](https://github.com/MaiM-with-u/MaiBot) 上的小黑盒社区运营插件，按 MaiBot 的插件规范开发：用它的插件生命周期、配置模型、模型调用能力和后台页面机制，配置页与命令都由宿主渲染。
+
+它把「运营一个小黑盒账号」拆成六块能力：接入、感知、创作、护栏、发布、状态。它不是定时群发工具 —— 刷到什么、想不想说、说什么、配什么图，都按账号自己的人设来定；没什么想说的，这一轮就不发。
 
 名称取意「自己的分享有回响」。
 
 - 插件 ID：`local.huixiang-operator`
 - 仓库：<https://github.com/1519160235/huixiang-operator>
+- 运行宿主：MaiBot ≥ 1.2.3（宿主 SDK ≥ 2.8.0）
 - 许可证：MIT
 
 ---
@@ -230,17 +233,32 @@ python -m unittest discover -s tests
 
 ## 参考实现
 
-以下列出参考的实现路径与参考点，未直接沿用任何第三方说明文档。
+本插件的四个来源，参考点如下。代码层面具体的文件级搬运方式见 [`docs/融合映射.md`](docs/融合映射.md)。
 
-| 实现 | 参考了什么 |
-|---|---|
-| 小黑盒 MCP（TypeScript） | 业务动作边界、护栏四件套（间隔 / AI 味 / 验证码 / 限流） |
-| 小黑盒适配器（Python） | 签名客户端、图床三步、扫码登录、主动浏览、分区动态 |
-| 二创小黑盒（Python） | 直连生图、内容生成、`life_state.json` 回退 |
-| MaiBot 插件开发指南 | `create_plugin`、`config_model`、配置段与版本约定 |
+| 来源 | 语言 | 项目地址 | 参考了什么 |
+|---|---|---|---|
+| 小黑盒 MCP | TypeScript | [Insect-rippler/XIAOHEIHE_MCP](https://github.com/Insect-rippler/XIAOHEIHE_MCP) | 业务动作边界，以及护栏口径（发帖间隔、AI 味、验证码熔断、限流）；纯算法部分直译成 Python |
+| 小黑盒适配器 | Python | [SengokuCola/xiaoheihe_adapter](https://github.com/SengokuCola/xiaoheihe_adapter) | 签名客户端（`vendor/`）、图床三步、扫码登录、主动浏览、分区动态 |
+| 二创小黑盒 | Python | [1519160235/heybox-operator](https://github.com/1519160235/heybox-operator) | 直连生图、内容生成、`life_state.json` 回退；上游原作见 [HannJia/xiaoheihe-operator](https://github.com/HannJia/xiaoheihe-operator) |
+| 回响骨架 | Python | 本仓库前身 | 六块接口划分、配置模型、状态机底座 |
+
+另有几处只作协议与字段口径核对、未包含代码的参考：
+[AaronZ345/xiaoheihe-cli](https://github.com/AaronZ345/xiaoheihe-cli)（图床协议、评论回读边界）、
+[674537331/astrbot_plugin_xiaoheihe_adapter](https://github.com/674537331/astrbot_plugin_xiaoheihe_adapter)、
+[Whereis-Alice/astrbot_plugin_xhhrobot](https://github.com/Whereis-Alice/astrbot_plugin_xhhrobot)、
+[lumingfei004/dph-heybox](https://github.com/lumingfei004/dph-heybox)、
+[k1m0206/better-XiaoHeiHe](https://github.com/k1m0206/better-XiaoHeiHe)、
+[fbbDirge/dsh-xhh](https://github.com/fbbDirge/dsh-xhh)。
+
+签名算法另参考 [XiaHouSheng/heybox-core](https://github.com/XiaHouSheng/heybox-core)。
+
+各来源的许可证与版权声明见 [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md)。
 
 ---
 
 ## 许可
 
-MIT
+本插件代码以 MIT 发布，见 [`LICENSE`](LICENSE)。
+
+运行宿主 [MaiBot](https://github.com/MaiM-with-u/MaiBot) 以 GPL-3.0 发布，
+本仓库不包含其源码。
