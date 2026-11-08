@@ -1,20 +1,21 @@
 {
   "manifest_version": 2,
   "id": "local.huixiang-operator",
-  "version": "0.7.0",
+  "version": "1.0.0",
   "name": "回响",
-  "description": "回响：融合多来源的 MaiBot 运营插件（六块：接入/感知/创作/护栏/发布/状态存储），支持扫码登录、选分区发帖、评论互动、感想总结、后台 Worker 与外围联动；默认演练，不启用不发帖。",
+  "description": "让 MaiBot 自己逛小黑盒：扫码登录、按分区发帖、评论互动、AI 配图，有想说的才发一条。默认演练模式，不开启不发帖。",
   "author": {
-    "name": "回响作者（占位，接入前替换）",
+    "name": "1519160235",
     "url": "https://github.com/1519160235"
   },
   "license": "MIT",
   "urls": {
-    "repository": "https://github.com/1519160235/huixiang-operator"
+    "repository": "https://github.com/1519160235/huixiang-operator",
+    "issues": "https://github.com/1519160235/huixiang-operator/issues"
   },
   "host_application": {
-    "min_version": "1.2.3",
-    "max_version": "1.3.99"
+    "min_version": "1.4.0",
+    "max_version": "1.4.99"
   },
   "sdk": {
     "min_version": "2.8.0",
@@ -35,5 +36,11 @@
   "i18n": {
     "default_locale": "zh-CN"
   },
-  "plugin_type": "extension"
+  "plugin_type": "automation",
+  "display": {
+    "icon": {
+      "type": "lucide",
+      "value": "message-circle"
+    }
+  }
 }

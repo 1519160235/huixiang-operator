@@ -87,17 +87,21 @@ class ConfigFieldDefaultsTest(unittest.TestCase):
         self.assertIn("DEFAULT_IMAGE_BASE_URL", src)
         self.assertIn("DEFAULT_IMAGE_MODEL", src)
 
-    def test_config_toml_ships_with_endpoint(self) -> None:
+    def test_example_config_ships_with_endpoint(self) -> None:
         import tomllib
 
-        data = tomllib.loads((ROOT / "config.toml").read_text(encoding="utf-8"))
+        # 插件市场要求根目录不能有 config.toml，仓库里给的是 config.example.toml。
+        data = tomllib.loads((ROOT / "config.example.toml").read_text(encoding="utf-8"))
         image = data["image"]
         self.assertEqual(image["image_api_base_url"], DEFAULT_IMAGE_BASE_URL)
         self.assertEqual(image["image_model"], DEFAULT_IMAGE_MODEL)
-        # key 不能随仓库分发。部署实例上这个字段是使用者自己填的，跳过这一条。
-        if image["image_api_key"]:
-            self.skipTest("这是已部署实例的运行配置，key 由使用者填写；只校验仓库模板")
+        # 仓库模板里绝不能出现真实 key（运行时的 config.toml 由使用者自己填）。
         self.assertEqual(image["image_api_key"], "")
+
+    def test_runtime_config_not_committed(self) -> None:
+        # 插件市场的仓库规范：根目录不能有 config.toml，运行配置要进 .gitignore。
+        ignore = (ROOT / ".gitignore").read_text(encoding="utf-8")
+        self.assertIn("config.toml", ignore.splitlines())
 
 
 class MainConfigCandidatesTest(unittest.TestCase):

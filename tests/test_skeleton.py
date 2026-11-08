@@ -154,9 +154,13 @@ class TestSkeleton(unittest.TestCase):
 
     def test_plugin_section_is_last_in_config_toml(self) -> None:
         """config.toml 中 [plugin] 段必须是最后一处表，防止后续键值被吞进 [plugin]。"""
+        # 仓库里给的是 config.example.toml（运行时 config.toml 不入库）；
+        # 本地部署目录若已有 config.toml，优先校验真实运行配置。
         config_path = ROOT / "config.toml"
         if not config_path.exists():
-            self.skipTest("config.toml 尚未就位，段顺序校验待其完成后生效")
+            config_path = ROOT / "config.example.toml"
+        if not config_path.exists():
+            self.skipTest("配置模板尚未就位，段顺序校验待其完成后生效")
 
         last_section: str | None = None
         for line in config_path.read_text(encoding="utf-8").splitlines():
