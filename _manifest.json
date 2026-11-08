@@ -1,7 +1,7 @@
 {
   "manifest_version": 2,
   "id": "local.huixiang-operator",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "name": "回响",
   "description": "让 MaiBot 自己逛小黑盒：扫码登录、按分区发帖、评论互动、AI 配图，有想说的才发一条。默认演练模式，不开启不发帖。",
   "author": {
@@ -22,16 +22,34 @@
     "max_version": "2.21.99"
   },
   "dependencies": [
-    { "type": "python_package", "name": "httpx", "version_spec": ">=0.28" },
-    { "type": "python_package", "name": "qrcode", "version_spec": ">=8" },
-    { "type": "python_package", "name": "pillow", "version_spec": ">=9" },
-    { "type": "python_package", "name": "pydantic", "version_spec": ">=2.8" }
+    {
+      "type": "python_package",
+      "name": "httpx",
+      "version_spec": ">=0.28"
+    },
+    {
+      "type": "python_package",
+      "name": "qrcode",
+      "version_spec": ">=8"
+    },
+    {
+      "type": "python_package",
+      "name": "pillow",
+      "version_spec": ">=9"
+    },
+    {
+      "type": "python_package",
+      "name": "pydantic",
+      "version_spec": ">=2.8"
+    }
   ],
   "capabilities": [
     "api.call",
     "llm.generate",
     "send.text",
-    "declarative_basic"
+    "declarative_basic",
+    "send.image",
+    "structured_arguments"
   ],
   "i18n": {
     "default_locale": "zh-CN"

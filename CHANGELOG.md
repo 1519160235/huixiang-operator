@@ -3,6 +3,22 @@
 > 记录规范：每条包含「变更内容 / 变更原因 / 验证方式」三段。
 > 仅记录本插件自身的变更，不转述上游说明，不记录环境运维细节。
 
+## 2026-11-08 · 1.0.1：补齐能力声明
+
+**变更内容**
+- `capabilities` 补上 `send.image` 与 `structured_arguments`。
+
+**变更原因**
+插件市场的自动审核指出：`plugin.py` 的 `_send_image` 用 `ctx.send.image` 发登录二维码，
+而 manifest 只声明了 `send.text`；`webui.json` 的 `required_capabilities` 里还要求
+`structured_arguments`，manifest 也没写。宿主按能力名精确比对，缺声明时调用会被拒，
+表现是「扫码登录出不来二维码」或后台页面不加载。
+
+**验证方式**
+- `grep` 确认 `ctx.send.image` 用于二维码发送（`plugin.py:523`）；
+  `webui.json` 的 `required_capabilities` 为 `declarative_basic` + `structured_arguments`。
+- 本地 364 条测试通过；服务器重载后插件正常加载。
+
 ## 2026-11-08 · 1.0.0：补免责声明，按插件市场规范整理仓库
 
 **变更内容**
