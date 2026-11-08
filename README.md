@@ -237,7 +237,7 @@ python -m unittest discover -s tests
 
 | 来源 | 语言 | 项目地址 | 参考了什么 |
 |---|---|---|---|
-| 小黑盒 MCP | TypeScript | [Insect-rippler/XIAOHEIHE_MCP](https://github.com/Insect-rippler/XIAOHEIHE_MCP) | 业务动作边界，以及护栏口径（发帖间隔、AI 味、验证码熔断、限流）；纯算法部分直译成 Python |
+| 小黑盒 MCP | TypeScript | [Insect-rippler/XIAOHEIHE_MCP](https://github.com/Insect-rippler/XIAOHEIHE_MCP) | **以上游为起点继续开发**：上游提供业务动作、签名、图床、评论、验证码熔断与限流；发帖间隔（gap）与去 AI 味打分（aiflavor）两个模块为本项目补充，上游没有。详见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) |
 | 小黑盒适配器 | Python | [SengokuCola/xiaoheihe_adapter](https://github.com/SengokuCola/xiaoheihe_adapter) | 签名客户端（`vendor/`）、图床三步、扫码登录、主动浏览、分区动态 |
 | 二创小黑盒 | Python | [1519160235/heybox-operator](https://github.com/1519160235/heybox-operator) | 直连生图、内容生成、`life_state.json` 回退；上游原作见 [HannJia/xiaoheihe-operator](https://github.com/HannJia/xiaoheihe-operator) |
 | 回响骨架 | Python | 本仓库前身 | 六块接口划分、配置模型、状态机底座 |
