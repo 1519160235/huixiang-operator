@@ -167,6 +167,28 @@ huixiang-operator/
 
 完整字段说明见 [`docs/配置说明.md`](docs/配置说明.md)。
 
+### 配图用的生图接口
+
+配图需要一个 OpenAI 兼容的生图接口，填在 `[image]` 段：
+
+```toml
+[image]
+image_api_base_url = "https://你的接口地址/v1"
+image_api_key = "sk-..."
+image_model = "gpt-image-2.6"
+image_size = "3840x2160"
+```
+
+作者自己在用的是飞鱼中转，支持 `gpt-image-2.x` 系列、能出 4K，也提供文本模型：
+
+> **https://ai.feiyuapi.top/register?aff=2U5HGJJJABLJ**
+>
+> 说明一下：这是带邀请码的注册链接，通过它注册，注册方和作者各得少量额度返还，
+> 不影响你实际付的钱。不感兴趣完全没关系 —— 任何 OpenAI 兼容接口都能用，
+> 改 `image_api_base_url` / `image_api_key` 就行，本地部署的接口也能接。
+
+如果不配生图接口，把 `[image].with_image` 设为 `false`，发帖就只发文字。
+
 ---
 
 ## 常用命令
