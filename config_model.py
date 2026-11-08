@@ -174,7 +174,7 @@ class BasicConfig(PluginConfigBase):
 
 
 class ModelConfig(PluginConfigBase):
-    """写内容（发帖 / 评论 / 感想）用哪个模型。
+    """写内容（发帖 / 评论）用哪个模型。
 
     留空或选「跟随宿主默认」时会用宿主 `replyer` 任务里的第一个模型——
     本机那条任务第一位是 DeepSeek，所以想用别的模型必须在这里显式选。
@@ -186,7 +186,7 @@ class ModelConfig(PluginConfigBase):
 
     text_model: MODEL_CHOICES = Field(
         default="feiyu-gemini-flash",
-        description="写帖子、写评论、写感想都用这个模型。选「跟随宿主默认」则用 replyer 任务的第一个模型。",
+        description="写帖子、写评论都用这个模型。选「跟随宿主默认」则用 replyer 任务的第一个模型。",
         **L("写内容用哪个模型", "默认 Gemini；不要 DeepSeek 就保持默认，别选「跟随宿主默认」"),
     )
     temperature: float = Field(
@@ -217,7 +217,7 @@ class LoginConfig(PluginConfigBase):
 
 
 class BrowseConfig(PluginConfigBase):
-    """主动刷小黑盒动态。刷到的东西会存起来，供互动和感想总结使用。"""
+    """主动刷小黑盒动态。刷到的东西会存起来，供互动和发帖使用。"""
 
     __ui_label__ = "自动浏览"
     __ui_icon__ = "list"
@@ -270,9 +270,9 @@ class InteractConfig(PluginConfigBase):
 
 
 class PublishConfig(PluginConfigBase):
-    """自己发帖的设置。默认分区、话题、允许发帖的时间段都在这儿。"""
+    """自己发帖的设置：发到哪个分区、挂什么话题、什么时候能发。"""
 
-    __ui_label__ = "发布设置"
+    __ui_label__ = "发帖① 时段 / 分区 / 话题"
     __ui_icon__ = "send"
     __ui_order__ = 5
 
@@ -282,22 +282,33 @@ class PublishConfig(PluginConfigBase):
         "",
     )
     linked_topics_enabled: bool = B(
-        "选分区后自动带话题",
-        "勾选后会按分区自动挑几个相关话题挂上",
+        "自动多挂几个分区",
+        "勾选后除了默认分区，还会按正文提到的内容再挂 1~2 个相关分区；"
+        "小黑盒提示「错误勾选会被处理」，所以只挂同类的，不按热度乱凑",
         True,
     )
-    max_topics: int = N("最多带几个话题", "单帖最多挂几个话题，建议不超过 5 个", 5)
+    max_topics: int = N("最多挂几个分区", "发帖时勾选的社区（小黑盒字段叫 topic_ids）；真实帖子常见 1~2 个", 5)
+    community_allowlist: list[str] = Field(
+        default_factory=list,
+        description="固定要挂的分区名（可选）。留空则按「默认分区 + 正文匹配」挑。",
+        **L("固定挂这些分区", "填分区名，逗号分隔，例如 盒友杂谈,PC游戏；留空则自动挑"),
+    )
     custom_topics: list[str] = Field(
         default_factory=list,
-        description="自动挑的话题不满意时，可以在这儿手动指定。",
-        **L("自定义话题", "填话题名，逗号分隔；留空则用自动挑的"),
+        description="（同「固定挂这些分区」，老配置项，保留兼容）",
+        **L("自定义分区", "老配置项，等同上一条"),
     )
-    post_time_window: str = T(
-        "允许发帖的时间段",
-        "格式 开始-结束，例如 09:00-22:00；这个时间段之外不会发帖",
-        "09:00-22:00",
+    hashtags_enabled: bool = B(
+        "自动带话题标签",
+        "勾选后按正文内容，从真实帖子里采到的话题池里挑 #标签；匹配不上就不带",
+        True,
     )
-    post_interval_minutes: int = N("发帖最小间隔（分钟）", "两篇帖子之间至少隔多久", 30)
+    max_hashtags: int = N("最多带几个话题", "话题是 # 标签，和分区不是一回事；真实帖子常见 3~5 个", 5)
+    custom_hashtags: list[str] = Field(
+        default_factory=list,
+        description="每次都带上的话题名（可选）。",
+        **L("固定带这些话题", "填话题名，逗号分隔，例如 盒友日常,沙雕；留空则自动挑"),
+    )
     readback_verify: bool = B(
         "发完回读确认",
         "发出去之后再读一次，确认真的发出去了；建议保持开启",
@@ -306,20 +317,25 @@ class PublishConfig(PluginConfigBase):
 
 
 class SummarizeConfig(PluginConfigBase):
-    """刷完一圈后写一篇感想发出去。字数段数在这里控制。"""
+    """发帖：刷到有意思的就发一条，没什么想说的就不发。字数段数在这里控制。"""
 
-    __ui_label__ = "感想总结"
+    __ui_label__ = "发帖② 开关 / 字数"
     __ui_icon__ = "pen-tool"
     __ui_order__ = 6
 
-    enabled: bool = B("开启感想总结", "刷够素材后自己写一篇感想发出去", True)
+    enabled: bool = B(
+        "允许发帖",
+        "到「发帖时段」内、有内容、自己也觉得想说两句，就发一条；"
+        "三项缺一就不发，不会硬凑",
+        True,
+    )
     trigger_by: TRIGGER_CHOICES = Field(
         default="按帖数",
-        description="按帖数：刷够多少条就写；按时间：隔多久写一次；两者都看：哪个先到算哪个。",
-        **L("什么时候触发", "从下拉里选就行，不用手打；三个条件分别对应下面的数字设置"),
+        description="旧版按「攒够 N 条」触发，现在已经不用了，忽略即可。",
+        **L("［已作废］触发方式", "旧版本用的，现在不用管，发不发由「发帖时段」和内容决定"),
     )
-    count_threshold: int = N("攒够多少条开始写", "触发方式包含「按帖数」时生效", 10)
-    time_hours: int = N("隔多少小时写一次", "触发方式包含「按时间」时生效", 24)
+    count_threshold: int = N("［已作废］攒够多少条开始写", "旧版本用的，现在不用管", 10)
+    time_hours: int = N("［已作废］隔多少小时写一次", "旧版本用的，现在不用管", 24)
 
     @field_validator("trigger_by", mode="before")
     @classmethod
@@ -327,24 +343,26 @@ class SummarizeConfig(PluginConfigBase):
         raw = str(value or "").strip()
         return _LEGACY_TRIGGER.get(raw.lower(), raw) or "按帖数"
 
-    min_chars: int = N("最少写多少字", "不够会用刷到的内容补足，不会硬凑废话", 200)
-    max_chars: int = N("最多写多少字", "超了会截断", 400)
-    min_paragraphs: int = N("最少分几段", "建议 2 段以上，读起来不闷", 2)
-    max_paragraphs: int = N("最多分几段", "建议不超过 4 段", 4)
 
 
 class ImageConfig(PluginConfigBase):
     """发帖时配图。生图接口留空就用 MaiBot 本体「画图」那套配置。"""
 
-    __ui_label__ = "配图设置"
+    __ui_label__ = "发帖③ 配图"
     __ui_icon__ = "image"
     __ui_order__ = 7
 
-    with_image: bool = B("发帖带配图", "勾选后每篇帖子会配图；生图失败会自动降级成纯文字", False)
+    with_image: bool = B("发帖带配图", "勾选后每篇帖子会配图；生图失败会自动降级成纯文字", True)
     image_count: int = N("配几张", "建议 1~3 张，太多容易发不出去", 1)
     image_api_base_url: str = T("生图接口地址", "留空则用 MaiBot 本体「画图」的配置", "")
     image_api_key: str = T("生图接口密钥", "留空则用本体配置；填了不会写进日志", "", password=True)
     image_model: str = T("生图模型名", "留空则用本体配置", "")
+    image_size: str = T(
+        "生图尺寸",
+        "例如 3840x2160 或 4096x4096（4K 大图）；留空用模型默认。"
+        "超过 5 MB 会自动压成 JPEG 再上传，不会因为太大传不上去",
+        "",
+    )
 
 
 class CreateConfig(PluginConfigBase):
@@ -397,7 +415,6 @@ class GuardConfig(PluginConfigBase):
     daily_quota_comment: int = N("每天最多评论几条", "到量当天不再评论", 20)
     daily_quota_like: int = N("每天最多点赞几次", "到量当天不再点赞", 50)
     daily_quota_reply: int = N("每天最多回复几条", "到量当天不再回复别人", 15)
-    post_interval_minutes: int = N("发帖最小间隔（分钟）", "两篇之间至少隔多久", 30)
     de_ai_flavor: bool = B("自动去 AI 味", "把「首先/其次/总之」这类套话和排比句去掉", True)
     ai_flavor_threshold: float = N(
         "AI 味阈值（越高越宽松）",
@@ -429,7 +446,7 @@ class LinksConfig(PluginConfigBase):
 
 
 class HuiXiangConfig(PluginConfigBase):
-    """回响：自动刷小黑盒、评论互动、写感想发帖的插件。默认演练模式，不会真发。"""
+    """回响：自动刷小黑盒、评论互动、有想说的就发一条的插件。默认演练模式，不会真发。"""
 
     __ui_label__ = "回响"
     __ui_icon__ = "zap"
@@ -441,9 +458,9 @@ class HuiXiangConfig(PluginConfigBase):
     login: LoginConfig = Field(default_factory=LoginConfig, description="登录设置")
     browse: BrowseConfig = Field(default_factory=BrowseConfig, description="自动浏览")
     interact: InteractConfig = Field(default_factory=InteractConfig, description="互动评论")
-    publish: PublishConfig = Field(default_factory=PublishConfig, description="发布设置")
-    summarize: SummarizeConfig = Field(default_factory=SummarizeConfig, description="感想总结")
-    image: ImageConfig = Field(default_factory=ImageConfig, description="配图设置")
+    publish: PublishConfig = Field(default_factory=PublishConfig, description="发帖：时段 / 分区 / 话题")
+    summarize: SummarizeConfig = Field(default_factory=SummarizeConfig, description="发帖")
+    image: ImageConfig = Field(default_factory=ImageConfig, description="发帖：配图")
     create: CreateConfig = Field(default_factory=CreateConfig, description="创作设置")
     sense: SenseConfig = Field(default_factory=SenseConfig, description="生活感知")
     guard: GuardConfig = Field(default_factory=GuardConfig, description="安全护栏")

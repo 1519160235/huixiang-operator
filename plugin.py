@@ -113,6 +113,32 @@ def auto_reply(func: Any) -> Any:
     return wrapper
 
 
+DEPRECATED_LABEL_PREFIX = "［已作废］"
+
+
+def strip_deprecated_fields(sections: Any) -> int:
+    """从 schema 的各个分组里删掉「已作废」字段，返回删掉的数量。
+
+    作废字段留在界面上只有坏处：用户会照着它的说明去找别的分组里才有的东西。
+    """
+    removed = 0
+    if not isinstance(sections, dict):
+        return removed
+    for section in sections.values():
+        fields = section.get("fields") if isinstance(section, dict) else None
+        if not isinstance(fields, dict):
+            continue
+        for key in [
+            name
+            for name, field in fields.items()
+            if isinstance(field, dict)
+            and str(field.get("label") or "").startswith(DEPRECATED_LABEL_PREFIX)
+        ]:
+            fields.pop(key, None)
+            removed += 1
+    return removed
+
+
 class HuiXiangPlugin(MaiBotPlugin):
     """回响插件主类：只做生命周期与编排，业务逻辑全部下沉到六块。"""
 
@@ -132,6 +158,13 @@ class HuiXiangPlugin(MaiBotPlugin):
         self._worker: OpsWorker | None = None
         self._qr_service: Any = None
         self._login_started_at: float = 0.0
+        # 后台试写任务：WebUI action 有宿主 11 秒硬超时，试写必须异步化。
+        # 存 {status: running/done, at: iso, result: dict|None, error: str|None}
+        self._test_job: dict[str, Any] | None = None
+        self._test_task: Any = None
+        # 后台「预览总结」任务：同样是同步 LLM 生成，同样要异步化，否则撞 11 秒超时。
+        self._preview_job: dict[str, Any] | None = None
+        self._preview_task: Any = None
 
     # ===================== 生命周期（必须全部 async） =====================
 
@@ -141,6 +174,17 @@ class HuiXiangPlugin(MaiBotPlugin):
         data_dir.mkdir(parents=True, exist_ok=True)
         self._store = state.StoreContainer(data_dir)
         self._runtime = Runtime(self, self.ctx, data_dir)
+
+        # 加载运行时扩充的表情白名单（小黑盒上新表情后由 worker 采样并入）。
+        # 内置 57 个始终兜底，这里只是叠加，读不到不影响任何功能。
+        try:
+            from layers import emojis as emoji_mod
+
+            extra = emoji_mod.load_extra(data_dir)
+            if extra:
+                self.ctx.logger.info("回响：表情白名单已加载（内置 57 + 扩充 %d）。", extra)
+        except Exception as exc:  # noqa: BLE001 —— 白名单加载失败不该影响插件启动。
+            self.ctx.logger.warning("回响：表情白名单加载失败（已忽略）：%s", exc)
 
         enabled = self.cfg().basic.enabled
         self.ctx.logger.info(
@@ -371,7 +415,7 @@ class HuiXiangPlugin(MaiBotPlugin):
 
     @Command(
         "hx_summarize",
-        description="对刷过的内容生成一篇 200–400 字感想总结（演练，不真发）。",
+        description="演练跑一次发帖：看这轮会不会想发、会写成什么样（不真发）。",
         pattern=r"^/回响总结$",
         aliases=["/hx_summary"],
     )
@@ -641,22 +685,32 @@ class HuiXiangPlugin(MaiBotPlugin):
         return await interact.respond_and_interact(ctx, mode)
 
     async def run_summary_once(self, ctx: Any, mode: RunMode = RunMode.DRY_RUN, force: bool = False) -> dict:
-        """感想总结一轮：判定触发 → 生成 → 校验形状 → 护栏 → 发帖 → 回读。
+        """发一条帖子：判定想不想发 → 生成 → 校验形状 → 护栏 → 发帖 → 回读。
 
-        :param force: 手动命令触发时跳过「触发判定」，有素材就直接生成。
+        :param force: 手动命令触发时跳过「时段判定」，但仍会问一句「想发吗」
+            （除非用户明确说要发，见 run_post_now）。
         """
         self._ensure_store(ctx)
         store = ctx.store.digest
         if not force:
-            triggered, reason = summarize.summary_ready(ctx, store)
+            # 【2026-11-08】触发从「刷够 N 条」改成「时段窗口 + 有没有值得发的」：
+            # 早/中/晚各一条的节奏，窗口里有东西就发，没东西不硬凑。
+            triggered, reason = await summarize.post_ready(ctx, store)
             if not triggered:
                 return {"ok": False, "code": "not_triggered", "message": reason}
         partition = await self._pick_partition(ctx)
-        result = await summarize.run_summary_once(ctx, partition=partition, mode=mode)
+        # 自动跑的时候会先问「想发吗」；手动「发一条」直接把 check_want 关掉。
+        result = await summarize.run_summary_once(
+            ctx,
+            partition=partition,
+            mode=mode,
+            allow_life_only=True,
+            check_want=not force,
+        )
         if not force:
             result["trigger"] = reason
         if result.get("ok") and result.get("post_id"):
-            await self._announce(ctx, "感想总结", str(result.get("post_id", "")))
+            await self._announce(ctx, "发了条帖子", str(result.get("post_id", "")))
         return result
 
     # ===================== 动态配置表单（发帖分区下拉） =====================
@@ -743,6 +797,12 @@ class HuiXiangPlugin(MaiBotPlugin):
                     )
                     field["description"] = field["hint"]
 
+        # 3) 已经作废的字段不渲染：留着只会让用户在配置页上找不存在的东西。
+        #    【2026-11-08 用户报障「你说看下面发帖窗口，我又没看见发帖窗口在哪」】
+        #    根因是「什么时候触发」写着「已弃用，看下面的发帖窗口」，而那个窗口
+        #    在另一个分组里。现在作废字段直接从 UI 剔除，分组名也标了序号。
+        strip_deprecated_fields(sections)
+
         return schema
 
     def _cached_partition_names(self) -> list[str]:
@@ -767,9 +827,26 @@ class HuiXiangPlugin(MaiBotPlugin):
 
     @API(name="hx_overview", description="读取回响工作台总览：运行状态、模式、额度与熔断", version="1")
     async def api_overview(self, **kwargs: Any) -> dict:
-        """总览数据：控制台首屏用。"""
+        """总览数据：控制台首屏用。
+
+        【2026-11-07 声明式页面改造】除原始值外，额外提供一批「已渲染好的中文文案」
+        （*_text）。声明式页面（WebUI schema v2 的 stat/text）只能直接显示字段值，
+        没有格式化能力，所以把「已用 / 上限」「运行中 / 已停用」这类判断放在这里做，
+        页面侧只做取值绑定。这样页面不需要任何脚本，也不会出现两套格式化逻辑。
+        """
         payload = await self._status_payload()
         cfg = self.cfg()
+        real_used = int(payload["real_quota_used"] or 0)
+        real_limit = int(payload.get("real_quota_limit", 0) or 0)
+        left = int(payload.get("real_quota_left", -1) or -1)
+        if real_limit > 0:
+            quota_text = f"{real_used} / {real_limit}"
+            quota_left_text = "今天的发帖额度已用完" if left <= 0 else f"今天还能发 {left} 篇"
+        else:
+            quota_text = str(real_used)
+            quota_left_text = "未设置上限"
+        test_job = self._test_job or {}
+        preview_job = self._preview_job or {}
         return {
             "ok": True,
             "enabled": bool(cfg.basic.enabled),
@@ -780,19 +857,100 @@ class HuiXiangPlugin(MaiBotPlugin):
             "worker_rounds": payload["worker_rounds"],
             "circuit_open": payload["circuit_open"],
             "dry_run_quota_used": payload["dry_run_quota_used"],
-            "real_quota_used": payload["real_quota_used"],
-            "real_quota_limit": payload.get("real_quota_limit", 0),
-            "real_quota_left": payload.get("real_quota_left", -1),
+            "real_quota_used": real_used,
+            "real_quota_limit": real_limit,
+            "real_quota_left": left,
             "text_model": payload.get("text_model", ""),
             "enabled_links": payload["enabled_links"],
             "logged_in": self._is_logged_in(),
             "pending_material": self.store().digest.pending_count(),
+            # 后台试写结果（异步化后经 overview 透出，前端每次刷新时拿到）。
+            "test_model": self._test_job,
+            # 后台预览总结结果（同样异步化透出）。
+            "preview_summary": self._preview_job,
+            # ---- 给声明式页面用的「已格式化」文案 ----
+            "enabled_text": "已开启" if cfg.basic.enabled else "已关闭",
+            "worker_text": "正在跑" if payload["worker_running"] else "没在跑",
+            "circuit_text": "已熔断" if payload["circuit_open"] else "正常",
+            "login_text": "已登录" if self._is_logged_in() else "未登录",
+            "quota_text": quota_text,
+            "quota_left_text": quota_left_text,
+            "dry_run_text": f"{payload['dry_run_quota_used']} 次",
+            "material_text": f"{self.store().digest.pending_count()} 条",
+            "model_text": payload.get("text_model", "") or "跟随宿主默认",
+            "test_model_text": self._describe_test_job(test_job),
+            "preview_summary_text": self._describe_preview_job(preview_job),
         }
+
+    @staticmethod
+    def _describe_test_job(job: dict) -> str:
+        """把试写任务状态翻成一句人话（声明式页面只能显示文本）。"""
+        if not job:
+            return "还没试写过。点上面的「试写一段」跑一次。"
+        status = str(job.get("status", "") or "")
+        if status == "running":
+            return "正在后台生成（推理模型较慢，约几十秒），稍后刷新就能看到结果。"
+        result = job.get("result") or {}
+        if result:
+            lines = [
+                f"配置指定：{result.get('configured', '')}",
+                f"实际回报：{result.get('actual_model', '')}",
+            ]
+            if result.get("fallback"):
+                lines.append(
+                    f"注意：配置的模型「{result.get('configured', '')}」已不可用，"
+                    f"自动改用「{result.get('requested_model', '')}」。"
+                )
+            sample = str(result.get("sample") or "").strip()
+            if sample:
+                lines.append("")
+                lines.append("生成样稿：")
+                lines.append(sample)
+            return "\n".join(lines)
+        if job.get("error"):
+            return f"试写失败：{job['error']}"
+        return "还没试写过。"
+
+    @staticmethod
+    def _describe_preview_job(job: dict) -> str:
+        """把预览总结任务状态翻成一段可读文本（含正文）。"""
+        if not job:
+            return "还没预览过。点上面的「预览一版总结」跑一次（演练，不发帖）。"
+        status = str(job.get("status", "") or "")
+        if status == "running":
+            return "总结正在后台生成（可能要一两分钟），稍后刷新就能看到。"
+        result = job.get("result") or {}
+        if result:
+            bits: list[str] = []
+            if result.get("chars"):
+                bits.append(f"{result['chars']} 字")
+            if result.get("paragraphs"):
+                bits.append(f"{result['paragraphs']} 段")
+            if result.get("rewrites"):
+                bits.append(f"重写 {result['rewrites']} 次")
+            score = result.get("ai_flavor_score")
+            if score is not None:
+                bits.append(f"AI 味 {round(float(score))}")
+            head = str(result.get("message") or "").strip()
+            if bits:
+                head = (head + "（" + " · ".join(bits) + "）") if head else "（" + " · ".join(bits) + "）"
+            title = str(result.get("title") or "").strip()
+            body = str(result.get("text") or "").strip()
+            parts = [head] if head else []
+            if title:
+                parts.append(f"标题：{title}")
+            if body:
+                parts.append("")
+                parts.append(body)
+            return "\n".join(parts) if parts else "这轮没有产出内容。"
+        if job.get("error"):
+            return f"预览失败：{job['error']}"
+        return "还没预览过。"
 
     @API(name="hx_action_log", description="读取最近的操作记录，返回中文条目", version="1")
     async def api_action_log(self, limit: int = 20, **kwargs: Any) -> dict:
         payload = await self._action_log_payload(limit=max(1, min(int(limit or 20), 200)))
-        labels = {"browse": "浏览", "interact": "互动", "summary": "感想总结", "post": "发帖"}
+        labels = {"browse": "浏览", "interact": "互动", "summary": "发帖", "post": "发帖"}
         for row in payload["entries"]:
             row["action_label"] = labels.get(row.get("action", ""), row.get("action", ""))
             row["ok_text"] = "成功" if row.get("ok") else "失败"
@@ -819,20 +977,46 @@ class HuiXiangPlugin(MaiBotPlugin):
             "samples": samples,
         }
 
-    @API(name="hx_preview_summary", description="预览一版感想总结（演练，不占额度不发帖）", version="1")
+    @API(name="hx_preview_summary", description="预览一版帖子（演练，不占额度不发帖）", version="1")
     async def api_preview_summary(self, **kwargs: Any) -> dict:
-        """演练跑一次感想总结，把正文和 AI 味分数给出来。
+        """演练跑一次发帖，把正文和 AI 味分数给出来。
 
         【为什么需要】用户 2026-11-06 报障「总结太像机器、建议重写却没动静」，
         而当时真实额度已用完，任何真实总结都会先被额度闸门拦住，看不到重写效果。
         这里固定走 DRY_RUN：不占额度、不发帖、不消费素材，随时能验证
         「重写到底有没有在跑」。
+
+        【异步化 2026-11-06】生成总结要真调 LLM 甚至多轮重写，远超宿主
+        WebUI action 的 11 秒硬超时，同步 await 必然 504。改成提交后台任务
+        立即返回，结果写 self._preview_job，由 hx_overview 透出、前端自动刷新。
         """
+        if self._preview_job and self._preview_job.get("status") == "running":
+            return {
+                "ok": True,
+                "status": "running",
+                "message": "上一次预览总结还在生成中，稍等自动刷新查看结果",
+            }
+        self._preview_job = {"status": "running", "at": state.now_iso(), "result": None, "error": None}
+        self._preview_task = asyncio.create_task(self._do_preview_summary())
+        return {
+            "ok": True,
+            "status": "running",
+            "message": "预览总结已提交，正在后台生成（可能要一两分钟），结果会自动刷新显示",
+        }
+
+    async def _do_preview_summary(self) -> None:
+        """后台执行预览总结，把结果写回 self._preview_job。"""
         rt = self.runtime()
         try:
             result = await self.run_summary_once(rt, RunMode.DRY_RUN, force=True)
-        except Exception as exc:  # noqa: BLE001 —— 诊断入口要如实回报错误。
-            return {"ok": False, "message": f"预览失败：{type(exc).__name__}: {exc}"}
+        except Exception as exc:  # noqa: BLE001
+            self._preview_job = {
+                "status": "done",
+                "at": state.now_iso(),
+                "result": None,
+                "error": f"{type(exc).__name__}: {exc}",
+            }
+            return
         self._log(
             rt,
             "summary",
@@ -849,17 +1033,24 @@ class HuiXiangPlugin(MaiBotPlugin):
             },
             mode=RunMode.DRY_RUN,
         )
-        return {
-            "ok": bool(result.get("ok")),
-            "message": str(
-                result.get("message")
-                or result.get("note")
-                or (f"预览成功：{result.get('chars')} 字 / {result.get('paragraphs')} 段" if result.get("ok") else "预览未成功")
-            ),
-            "chars": result.get("chars"),
-            "paragraphs": result.get("paragraphs"),
-            "rewrites": result.get("rewrites"),
-            "ai_flavor_score": result.get("ai_flavor_score"),
+        self._preview_job = {
+            "status": "done",
+            "at": state.now_iso(),
+            "result": {
+                "ok": bool(result.get("ok")),
+                "message": str(
+                    result.get("message")
+                    or result.get("note")
+                    or (f"预览成功：{result.get('chars')} 字 / {result.get('paragraphs')} 段" if result.get("ok") else "预览未成功")
+                ),
+                "title": result.get("title"),
+                "text": result.get("text"),
+                "chars": result.get("chars"),
+                "paragraphs": result.get("paragraphs"),
+                "rewrites": result.get("rewrites"),
+                "ai_flavor_score": result.get("ai_flavor_score"),
+            },
+            "error": None,
         }
 
     @API(name="hx_test_model", description="试写一小段，确认当前用的是哪个模型（不发布）", version="1")
@@ -869,17 +1060,41 @@ class HuiXiangPlugin(MaiBotPlugin):
         用户 2026-11-06 报障「配了 GM 却用 DeepSeek」，光看配置无法确认，
         必须真跑一次并把宿主回传的 model 字段摊开，才能证明改对了。
         只生成文本，不碰小黑盒、不占额度、不写任何状态。
+
+        【异步化 2026-11-06】宿主 WebUI action 有 11 秒硬超时
+        （webui_extensions.py 里 asyncio.wait_for(..., timeout=11)），而
+        feiyu-gemini-flash 是推理模型、试写动辄几十秒，同步 await 必然撞墙。
+        改成：提交后台任务立即返回，结果写进 self._test_job，由 hx_overview
+        透出，前端每 10 秒自动刷新时自然拿到结果。
         """
+        if self._test_job and self._test_job.get("status") == "running":
+            return {
+                "ok": True,
+                "status": "running",
+                "message": "上一次试写还在进行中，稍等自动刷新查看结果",
+            }
+        self._test_job = {"status": "running", "at": state.now_iso(), "result": None, "error": None}
+        self._test_task = asyncio.create_task(self._do_test_model())
+        return {
+            "ok": True,
+            "status": "running",
+            "message": "试写已提交，正在后台生成（推理模型较慢，约几十秒），结果会自动刷新显示",
+        }
+
+    async def _do_test_model(self) -> None:
+        """后台执行试写：真调一次宿主大模型，把结果写回 self._test_job。"""
         rt = self.runtime()
         model_cfg = getattr(self.cfg(), "model", None)
         wanted = str(getattr(model_cfg, "text_model", "") or "")
         try:
             llm = getattr(rt.host, "llm", None)
             if llm is None or not hasattr(llm, "generate"):
-                return {"ok": False, "message": "宿主未提供大模型能力"}
-            model_name, temperature, max_tokens = rt._text_model_options()
+                self._test_job = {"status": "done", "at": state.now_iso(), "result": None, "error": "宿主未提供大模型能力"}
+                return
+            wanted_model, temperature, max_tokens = rt._text_model_options()
+            # 配置名可能已下线/改名，先解析成当前真实可用的模型（不把名字写死）。
+            model_name = await rt._resolve_model_name(wanted_model) if wanted_model else ""
             call_kwargs: dict[str, Any] = {"task_name": "replyer"}
-            # 宿主默认 30 秒就超时，试写也常跑不完；给足预算（见 runtime.DEFAULT_TIMEOUT_MS）。
             from runtime import DEFAULT_TIMEOUT_MS
 
             call_kwargs["timeout_ms"] = DEFAULT_TIMEOUT_MS
@@ -890,28 +1105,37 @@ class HuiXiangPlugin(MaiBotPlugin):
             if max_tokens:
                 call_kwargs["max_tokens"] = max_tokens
             raw = await llm.generate(
-                "用一句话说说你今天刷到了什么，20 字以内，别客套。", **call_kwargs
+                "用一句话说说你今天刷到了什么，20 字以内，别客套。只输出中文这一句，不要思考过程、不要英文。",
+                **call_kwargs,
             )
             text = raw.get("text") or raw.get("content") or raw.get("response") or "" if isinstance(raw, dict) else str(raw)
+            # 飞鱼 Gemini 是推理模型，思考内联在 content 里且是英文、无 <think> 标签，
+            # 试写会带出一大段英文思考（用户 2026-11-06 报「试写出来是英文」）。
+            # 复用 create 的清洗：先剥开头英文思考段，再强清洗（转简/剥英文/去重）。
+            text = create.sanitize_comment(create.strip_reasoning_prefix(str(text)))
             actual = ""
             if isinstance(raw, dict):
                 actual = str(raw.get("model") or raw.get("model_name") or "")
-            return {
+            result = {
                 "ok": bool(str(text).strip()),
                 "configured": wanted or "（跟随宿主默认）",
                 "requested_model": model_name or "（不指定，用任务第一个）",
                 "actual_model": actual or "（宿主未回报）",
+                "fallback": bool(wanted_model and model_name and model_name != wanted_model),
+                "available_models": (await rt._available_models())[:12],
                 "sample": str(text).strip()[:200],
                 "message": (
                     f"配置用 {wanted or '宿主默认'}，实际回报模型 {actual or '未知'}，试写成功"
                     if str(text).strip() else "宿主没返回内容，模型可能没配好"
                 ),
             }
-        except Exception as exc:  # noqa: BLE001 —— 诊断接口要把错误如实显示出来。
-            return {
-                "ok": False,
-                "configured": wanted or "（跟随宿主默认）",
-                "message": f"试写失败：{type(exc).__name__}: {exc}",
+            self._test_job = {"status": "done", "at": state.now_iso(), "result": result, "error": None}
+        except Exception as exc:  # noqa: BLE001 —— 试写失败如实记下，由前端展示。
+            self._test_job = {
+                "status": "done",
+                "at": state.now_iso(),
+                "result": None,
+                "error": f"{type(exc).__name__}: {exc}",
             }
 
     @API(name="hx_reset_circuit", description="手动解除验证码熔断", version="1")
@@ -923,6 +1147,49 @@ class HuiXiangPlugin(MaiBotPlugin):
             circuit.clear()
         self._log(self.runtime(), "circuit", True, "后台手动解除验证码熔断", mode=RunMode.DRY_RUN)
         return {"ok": True, "message": "熔断已解除，可以继续执行动作了"}
+
+    @API(name="hx_reset_quota", description="把今天某模式的额度清零（测试占用后手动复位）", version="1")
+    async def api_reset_quota(self, mode: str = "real", **kwargs: Any) -> dict:
+        """重置额度：默认清「真实」今天全部动作的额度（发帖 / 评论 / 点赞 / 回复）。
+
+        背景（用户 2026-11-06）：切自动模式试发帖时会把 daily_quota_post 占掉，
+        之后想继续发帖被额度闸门拦住，需要一个人工复位入口。
+
+        【2026-11-07 修正】额度桶已改为「模式 + 日期 + 动作」三键隔离，
+        评论不再挤占发帖额度；这里的复位按钮仍然是「今天全部动作一起清零」，
+        否则用户点一次只清一个桶、还得点四次。
+        """
+        m = RunMode.DRY_RUN if str(mode or "real").lower() in {"dry_run", "dry", "演练"} else RunMode.REAL
+        day = state.today_str()
+        before = self.store().quota.reset_all(m, day)
+        label = "演练" if m is RunMode.DRY_RUN else "真实"
+        self._log(self.runtime(), "quota", True, f"后台重置{label}额度（复位前已用 {before}）", mode=m)
+        return {
+            "ok": True,
+            "mode": m.value,
+            "date": day,
+            "before": before,
+            "message": f"已清零今天{label}额度（复位前已用 {before} 次），可以继续发帖了",
+        }
+
+    @API(name="hx_delete_post", description="删除自己发的一条帖子（清理测试内容）", version="1")
+    async def api_delete_post(self, post_id: str = "", **kwargs: Any) -> dict:
+        """删除指定帖子。
+
+        【为什么需要】验证发帖链路时难免真的发出一条测试帖；
+        没有删除入口就只能让用户去 App 里翻。
+        实测 `/bbs/app/link/delete` 可用，重复删返回「帖子已经删除」按成功处理。
+        """
+        pid = str(post_id or "").strip()
+        if not pid:
+            pid = str(kwargs.get("id") or kwargs.get("link_id") or "").strip()
+        if not pid:
+            return {"ok": False, "message": "请填写要删除的帖子 ID"}
+        rt = self.runtime()
+        self._ensure_store(rt)
+        ok, message = await publish.delete_post(rt, pid)
+        self._log(rt, "delete", ok, message, {"post_id": pid})
+        return {"ok": ok, "post_id": pid, "message": message}
 
     @API(name="hx_get_config", description="读取当前插件配置，供后台管理页面编辑", version="1")
     async def api_get_config(self, **kwargs: Any) -> dict:
@@ -1088,7 +1355,11 @@ class HuiXiangPlugin(MaiBotPlugin):
 
     @API(name="hx_login_status", description="读取小黑盒登录状态与当前二维码", version="1")
     async def api_login_status(self, **kwargs: Any) -> dict:
-        """后台轮询用：未登录时带二维码，已登录时带账号信息。凭据绝不返回。"""
+        """后台轮询用：未登录时带二维码，已登录时带账号信息。凭据绝不返回。
+
+        【2026-11-07 声明式页面改造】额外给 `qr_hint`：声明式页面只能显示文本或
+        `image` 节点，没法写「有码 / 没码」的条件逻辑，所以把提示语在这里拼好。
+        """
         info = self._login_identity()
         if info.get("logged_in"):
             return {
@@ -1099,18 +1370,28 @@ class HuiXiangPlugin(MaiBotPlugin):
                 "qr_image": "",
                 "remaining_seconds": 0,
                 "state": "success",
+                "qr_hint": "已登录，不需要扫码。",
             }
         service = self._qr_service
         snap = service.snapshot() if service is not None else {}
         state = str(snap.get("login_state") or "idle")
+        qr_image = str(snap.get("qr_image") or "")
+        remaining = int(snap.get("remaining_seconds") or 0)
+        if qr_image and remaining > 0:
+            qr_hint = f"二维码已生成，剩余约 {remaining} 秒。"
+        elif qr_image:
+            qr_hint = "二维码已过期，请在聊天里发 /回响登录 重新生成。"
+        else:
+            qr_hint = "还没有二维码。请在聊天里发 /回响登录，机器人会把二维码发给你。"
         return {
             "logged_in": False,
             "nickname": "",
             "uid_tail": "",
             "message": str(snap.get("login_message") or "尚未登录，请生成二维码后扫码"),
-            "qr_image": str(snap.get("qr_image") or ""),
-            "remaining_seconds": int(snap.get("remaining_seconds") or 0),
+            "qr_image": qr_image,
+            "remaining_seconds": remaining,
             "state": state,
+            "qr_hint": qr_hint,
         }
 
     @API(name="hx_request_qr", description="生成新的小黑盒扫码登录二维码", version="1")
@@ -1186,15 +1467,19 @@ class HuiXiangPlugin(MaiBotPlugin):
         day = state.today_str()
         guard_cfg = self.cfg().guard
         model_cfg = getattr(self.cfg(), "model", None)
-        real_used = store.quota.get(RunMode.REAL, day).used
+        real_used = store.quota.get(RunMode.REAL, day, "post").used
         post_limit = int(getattr(guard_cfg, "daily_quota_post", 3) or 0)
+        comment_used = store.quota.get(RunMode.REAL, day, "comment").used
+        comment_limit = int(getattr(guard_cfg, "daily_quota_comment", 20) or 0)
         return {
             "date": day,
-            "dry_run_quota_used": store.quota.get(RunMode.DRY_RUN, day).used,
+            "dry_run_quota_used": store.quota.get(RunMode.DRY_RUN, day, "post").used,
             "real_quota_used": real_used,
             # 额度上限要一起给：只报「用了 4 次」看不出「3 条已经用完了」。
             "real_quota_limit": post_limit,
             "real_quota_left": max(0, post_limit - real_used) if post_limit > 0 else -1,
+            "real_comment_used": comment_used,
+            "real_comment_limit": comment_limit,
             "text_model": str(getattr(model_cfg, "text_model", "") or "跟随宿主默认"),
             "circuit_open": store.circuit.is_open(),
             "worker_running": bool(self._worker and self._worker.running),

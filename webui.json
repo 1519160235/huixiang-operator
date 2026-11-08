@@ -1,56 +1,183 @@
 {
   "schema_version": 2,
-  "required_capabilities": ["custom_pages", "structured_arguments"],
-  "workspace_title": "回响",
+  "required_capabilities": ["declarative_basic", "structured_arguments"],
   "pages": [
     {
       "id": "console",
-      "title": "回响 · 后台管理",
-      "description": "全中文后台：看运行状态、额度、熔断、分区目录和最近操作，也能手动触发一轮浏览。",
-      "placement": "workspace",
+      "title": "回响 · 运营台",
+      "description": "小黑盒运营插件中控台：运行状态、今日额度、手动跑一轮、账号与操作记录。配置项请到「插件设置」里改（宿主原生表单，改完即生效）。每 10 秒自动刷新。",
       "icon": "chart",
-      "mode": "custom",
-      "entry": "webui/控制台.html",
-      "layout": "document",
+      "mode": "declarative",
+      "auto_refresh": true,
+      "poll_interval_seconds": 10,
       "queries": {
         "overview": { "api": "hx_overview", "version": "1", "parameters": {} },
-        "action_log": {
+        "log": {
           "api": "hx_action_log",
           "version": "1",
           "parameters": {
-            "limit": { "type": "integer", "required": false, "minimum": 1, "maximum": 200 }
+            "limit": { "type": "integer", "required": false, "minimum": 1, "maximum": 50 }
           }
         },
-        "login_status": { "api": "hx_login_status", "version": "1", "parameters": {} },
-        "config_schema": { "api": "hx_config_schema", "version": "1", "parameters": {} },
-        "get_config": { "api": "hx_get_config", "version": "1", "parameters": {} }
+        "login": { "api": "hx_login_status", "version": "1", "parameters": {} }
       },
       "actions": {
-        "browse_now": { "api": "hx_browse_now", "version": "1", "parameters": {} },
+        "browse": { "api": "hx_browse_now", "version": "1", "parameters": {} },
+        "preview": { "api": "hx_preview_summary", "version": "1", "parameters": {} },
         "test_model": { "api": "hx_test_model", "version": "1", "parameters": {} },
-        "preview_summary": { "api": "hx_preview_summary", "version": "1", "parameters": {} },
-        "save_config": {
-          "api": "hx_save_config",
+        "reset_quota": {
+          "api": "hx_reset_quota",
           "version": "1",
-          "parameters": {
-            "sections": { "type": "string", "required": true, "max_length": 60000 }
-          },
-          "confirmation": "确认保存配置？保存后会立即生效。"
-        },
-        "request_qr": { "api": "hx_request_qr", "version": "1", "parameters": {} },
-        "logout": {
-          "api": "hx_logout",
-          "version": "1",
-          "parameters": {},
-          "confirmation": "确认退出小黑盒登录？退出后需要重新扫码。"
+          "parameters": { "mode": { "type": "string", "required": false } },
+          "confirmation": "把今天真实模式的额度清零（发帖 / 评论 / 点赞 / 回复一起清）？测试占用后复位用。"
         },
         "reset_circuit": {
           "api": "hx_reset_circuit",
           "version": "1",
           "parameters": {},
-          "confirmation": "确认解除验证码熔断并恢复当日动作？"
+          "confirmation": "确认风控已解除，恢复今天的动作？"
         }
-      }
+      },
+      "content": [
+        {
+          "type": "grid",
+          "columns": 4,
+          "children": [
+            { "type": "stat", "label": "插件开关", "value": { "scope": "query", "source": "overview", "field": "enabled_text" } },
+            { "type": "stat", "label": "运行模式", "value": { "scope": "query", "source": "overview", "field": "mode" } },
+            { "type": "stat", "label": "后台任务", "value": { "scope": "query", "source": "overview", "field": "worker_text" } },
+            { "type": "stat", "label": "小黑盒登录", "value": { "scope": "query", "source": "overview", "field": "login_text" } }
+          ]
+        },
+        {
+          "type": "tabs",
+          "children": [
+            {
+              "type": "stack",
+              "label": "总览",
+              "children": [
+                {
+                  "type": "card",
+                  "label": "运行状态",
+                  "children": [
+                    {
+                      "type": "grid",
+                      "columns": 3,
+                      "children": [
+                        { "type": "stat", "label": "已跑轮数", "value": { "scope": "query", "source": "overview", "field": "worker_rounds" } },
+                        { "type": "stat", "label": "待总结素材", "value": { "scope": "query", "source": "overview", "field": "material_text" } },
+                        { "type": "stat", "label": "验证码熔断", "value": { "scope": "query", "source": "overview", "field": "circuit_text" } }
+                      ]
+                    },
+                    { "type": "text", "label": "写内容用的模型", "value": { "scope": "query", "source": "overview", "field": "model_text" } },
+                    { "type": "text", "label": "今日日期", "value": { "scope": "query", "source": "overview", "field": "date" } }
+                  ]
+                },
+                {
+                  "type": "card",
+                  "label": "今日额度",
+                  "children": [
+                    {
+                      "type": "grid",
+                      "columns": 3,
+                      "children": [
+                        { "type": "stat", "label": "真实发帖（已用 / 上限）", "value": { "scope": "query", "source": "overview", "field": "quota_text" } },
+                        { "type": "stat", "label": "演练已用", "value": { "scope": "query", "source": "overview", "field": "dry_run_text" } },
+                        { "type": "stat", "label": "剩余", "value": { "scope": "query", "source": "overview", "field": "quota_left_text" } }
+                      ]
+                    },
+                    { "type": "text", "value": "演练不占真实额度。发帖、评论、点赞、回复各自独立计数，评论不会挤掉发帖额度。" }
+                  ]
+                }
+              ]
+            },
+            {
+              "type": "stack",
+              "label": "手动操作",
+              "children": [
+                {
+                  "type": "card",
+                  "label": "跑一轮 / 看效果",
+                  "children": [
+                    { "type": "text", "value": "下面按钮都只走演练，不会在小黑盒产生真实内容。" },
+                    { "type": "button", "label": "立刻浏览一轮", "action": "browse", "variant": "primary" },
+                    { "type": "button", "label": "预览一版总结（不发帖）", "action": "preview", "variant": "muted" }
+                  ]
+                },
+                {
+                  "type": "card",
+                  "label": "试写：确认用的是哪个模型",
+                  "children": [
+                    { "type": "text", "value": "真调一次大模型，显示「配置指定的模型」和「宿主实际回报的模型」。配置的模型名失效时会在这里说明。" },
+                    { "type": "button", "label": "试写一段", "action": "test_model", "variant": "muted" },
+                    { "type": "text", "label": "试写结果", "format": "log", "value": { "scope": "query", "source": "overview", "field": "test_model_text" } }
+                  ]
+                },
+                {
+                  "type": "card",
+                  "label": "预览总结结果",
+                  "children": [
+                    { "type": "text", "label": "本次产出", "format": "log", "value": { "scope": "query", "source": "overview", "field": "preview_summary_text" } }
+                  ]
+                }
+              ]
+            },
+            {
+              "type": "stack",
+              "label": "账号",
+              "children": [
+                {
+                  "type": "card",
+                  "label": "小黑盒账号",
+                  "children": [
+                    { "type": "text", "label": "登录状态", "value": { "scope": "query", "source": "login", "field": "message" } },
+                    { "type": "text", "label": "二维码", "value": { "scope": "query", "source": "login", "field": "qr_hint" } },
+                    { "type": "text", "value": "扫码：打开手机小黑盒 App →「我的」→ 扫一扫，对准聊天里收到的二维码并确认。二维码约 2 分钟内有效，过期就再发一次 /回响登录。" }
+                  ]
+                }
+              ]
+            },
+            {
+              "type": "stack",
+              "label": "操作记录",
+              "children": [
+                {
+                  "type": "card",
+                  "label": "最近动作",
+                  "children": [
+                    {
+                      "type": "table",
+                      "value": { "scope": "query", "source": "log", "field": "entries" },
+                      "columns": [
+                        { "field": "at", "label": "时间" },
+                        { "field": "action_label", "label": "动作" },
+                        { "field": "ok_text", "label": "结果" },
+                        { "field": "message", "label": "说明" }
+                      ]
+                    }
+                  ]
+                },
+                {
+                  "type": "card",
+                  "label": "维护",
+                  "children": [
+                    { "type": "text", "value": "额度被测试占满、或触发风控后动作被暂停时，用下面两个按钮恢复。删除帖子请在 App 里操作。" },
+                    { "type": "button", "label": "重置今日额度", "action": "reset_quota", "variant": "muted" },
+                    { "type": "button", "label": "解除验证码熔断", "action": "reset_circuit", "variant": "danger" }
+                  ]
+                },
+                {
+                  "type": "card",
+                  "label": "QQ 命令",
+                  "children": [
+                    { "type": "text", "value": "/回响状态　/回响浏览　/回响试发　/回响总结　/回响记录　/回响登录　/回响登出" }
+                  ]
+                }
+              ]
+            }
+          ]
+        }
+      ]
     }
   ]
 }

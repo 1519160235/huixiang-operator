@@ -11,11 +11,14 @@
 - 直连签名客户端已搬入（vendor/），读走 generate_hkey、写走 comment_query
 - 扫码登录与四字段凭据校验已落地（auth.py），二维码过期能重新生成
 - 发帖 / 图床 / 回读 / 分区目录已接好（community_client.py + media_upload.py + layers/publish.py + layers/inbound.py）
-- 护栏六道闸 + 发帖时段闸门、演练不占额度、AI 味打分（直译 aiflavor.ts）已落地并测通
+- 护栏多道闸（额度 / 去重 / AI 味 / 熔断）、演练不占额度、AI 味打分（直译 aiflavor.ts）已落地并测通
+- **发帖不设时段、不设字数**：什么时候发、写多长，都由它自己判断（先问「想发吗」，不想发就不发）
 - 评论 / 楼中楼（带 rootId）/ 通知响应已落地（layers/publish.py + layers/interact.py），同一通知不重复处理
 - 自动浏览支持勾选分区只刷勾选分区，分区目录定时刷新（layers/inbound.py）
-- 感想总结已落地（layers/summarize.py）：字数段数代码侧收敛、count/time/both 触发判定、浏览摘要去重
-- 后台 Worker 已落地（worker.py）：浏览→互动→总结按间隔循环，作息判停、单轮异常不中断、操作记录留痕
+- 发帖已落地（layers/summarize.py）：8 种发帖动机轮换、标题去重、浏览摘要去重、接地检查防编造
+- 后台 Worker 已落地（worker.py）：浏览→互动→发帖按间隔循环，作息判停、单轮异常不中断、操作记录留痕
+- 发帖自动挂分区与话题：分区按「默认 + 正文命中」挑，话题（hashtag）从真实帖采样后按正文匹配
+- 配图支持 4K（`[image].image_size`），超 5 MB 自动压成 JPEG 再上传
 - 外围联动已落地（layers/links.py）：语音 / QQ 空间 / 日记三个旁路出口，关掉任一个不影响发帖闭环
 - 不连真实账号，只跑合成数据纯逻辑自检
 - 不上服务器，不改任何运行中的服务
@@ -73,15 +76,15 @@ huixiang-operator/
 │  ├─ guard.py          护栏层：额度、间隔、去重、AI 味、熔断
 │  ├─ publish.py        发布层：发帖、评论、楼中楼、通知回复、图床、回读
 │  ├─ interact.py       互动编排层：通知响应、主动浏览评论
-│  ├─ summarize.py      总结编排层：触发判定、字数段数校验、总结发帖
+│  ├─ summarize.py      发帖编排层：想不想发、动机轮换、护栏、发布、回读
 │  └─ links.py          外围联动：语音播报 / QQ 空间 / 日记（旁路，失败不影响主闭环）
 ├─ tests/
 │  ├─ test_skeleton.py       骨架自检单测。unittest 本地跑
 │  ├─ test_stage2_signing.py 第二阶段签名自查。读/写签名、四字段、脱敏
 │  ├─ test_stage3_closed_loop.py 第三阶段最小闭环自查。口语清洗、AI 味、护栏、额度隔离、topicIds
 │  ├─ test_stage4_interact.py    第四阶段互动自查。楼中楼 rootId、通知去重、分区过滤、评论护栏
-│  └─ test_stage5_summary.py     第五阶段总结自查。字数段数收敛、触发判定、浏览摘要、总结帖格式
-│  ├─ test_stage6_worker.py      第六阶段 Worker 自查。作息判停、发帖时段、操作记录、限流熔断、额度
+│  ├─ test_stage5_summary.py     发帖自查。动机轮换、标题去重、浏览摘要、接地检查
+│  ├─ test_stage6_worker.py      Worker 自查。作息判停、操作记录、限流熔断、额度
 │  └─ test_stage7_links.py       第七阶段联动自查。开关短路、失败降级、解耦闭环
 └─ webui/
    └─ 控制台.html       浅色中文工作台骨架

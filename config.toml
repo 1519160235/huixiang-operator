@@ -54,25 +54,20 @@ reply_replies = true
 default_partition = ""
 linked_topics_enabled = true
 max_topics = 5
+community_allowlist = []
 custom_topics = []
-post_time_window = "09:00-22:00"
-post_interval_minutes = 30
+hashtags_enabled = true
+max_hashtags = 5
+custom_hashtags = []
 readback_verify = true
 
-# ---- [summarize] 感想总结发帖 ----
+# ---- [summarize] 发帖（想发就发，篇幅与时段都不设限） ----
 [summarize]
 enabled = true
-trigger_by = "按帖数"
-count_threshold = 10
-time_hours = 24
-min_chars = 200
-max_chars = 400
-min_paragraphs = 2
-max_paragraphs = 4
 
 # ---- [image] AI 配图 ----
 [image]
-with_image = false
+with_image = true
 image_count = 1
 image_api_base_url = ""
 image_api_key = ""
@@ -95,7 +90,6 @@ daily_quota_post = 3
 daily_quota_comment = 20
 daily_quota_like = 50
 daily_quota_reply = 15
-post_interval_minutes = 30
 de_ai_flavor = true
 ai_flavor_threshold = 60
 captcha_circuit_break = true

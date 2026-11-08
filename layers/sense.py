@@ -25,6 +25,86 @@ from layers._cfg import read as _read, read_bool as _read_bool, read_int as _rea
 from models import Cursor, LifeTrace, Topic
 
 
+def _life_state_candidates(ctx: Any) -> list[Path]:
+    """life_state.json 的候选路径。
+
+    【真机缺陷 2026-11-08】原来只找自己 data_dir 下的 life_state.json，
+    但那个文件是 life-frequency 插件写在自己数据目录里的，
+    于是回响永远读不到生活状态 —— 日记模式和人设都成了空壳。
+    life-frequency 的数据目录与本插件同级（data/plugins/<插件名>/）。
+    """
+    paths = getattr(ctx, "paths", None)
+    base = getattr(paths, "state_dir", None) or getattr(paths, "data_dir", None)
+    if not base:
+        return []
+    root = Path(base)
+    return [
+        root / contracts.FALLBACK_LIFE_STATE_FILE,
+        root.parent / "org.orge-8.life-frequency" / contracts.FALLBACK_LIFE_STATE_FILE,
+        root.parent / "life-frequency" / contracts.FALLBACK_LIFE_STATE_FILE,
+    ]
+
+
+def _mood_text(emotion: Any) -> str:
+    """把 life-frequency 的 emotion 数值（0~10）翻成中文情绪。"""
+    try:
+        value = float(emotion)
+    except (TypeError, ValueError):
+        return ""
+    if value < 3:
+        return "低落"
+    if value < 5:
+        return "有点闷"
+    if value < 7:
+        return "平静"
+    if value < 8.5:
+        return "还不错"
+    return "挺兴奋"
+
+
+def _opt_float(value: Any) -> float | None:
+    """把可能缺失的数值转成 float；缺失/非法返回 None（表示「未知」）。
+
+    【真机缺陷 2026-11-08】原来写的是 `float(x or 0)` —— life-frequency 的接口
+    不返回 social_battery / 社交电量时，这里被兜成 0.0，等于「社交电量 0%」，
+    于是发帖永久被判「社交电量太低，先不发」，日志里连续几十条都是这个原因。
+    未知就该是 None，不能当成 0。
+    """
+    if value is None or value == "":
+        return None
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _trace_from_state(data: dict[str, Any]) -> LifeTrace:
+    """把 life_state.json 解析成 LifeTrace（含 activity / scene 等日记素材）。"""
+    scene = str(data.get("scene") or "").strip()
+    activity = str(data.get("activity") or "").strip()
+    note = str(data.get("activity_note") or "").strip()
+    energy_raw = data.get("energy")
+    cap = data.get("energy_cap") or 10
+    energy = None
+    try:
+        energy = max(0.0, min(1.0, float(energy_raw) / float(cap)))
+    except (TypeError, ValueError, ZeroDivisionError):
+        energy = None
+    return LifeTrace(
+        routine=scene or activity,
+        mood=_mood_text(data.get("emotion")),
+        energy=energy,
+        social_battery=None,  # life-frequency 没有这个概念，保持 None（不拦截）
+        captured_at=state_mod.now_iso(),
+        extra={
+            "activity": activity,
+            "scene": scene,
+            "activity_note": note,
+            "emotion": data.get("emotion"),
+        },
+    )
+
+
 async def read_life_trace(ctx: Any) -> LifeTrace:
     """读取当前生活轨迹：优先 ctx.api.call，失败回退直读 life_state.json。"""
     api = getattr(ctx, "api", None)
@@ -35,29 +115,23 @@ async def read_life_trace(ctx: Any) -> LifeTrace:
                 return LifeTrace(
                     routine=str(result.get("routine", result.get("作息", ""))),
                     mood=str(result.get("mood", result.get("情绪", ""))),
-                    energy=float(result.get("energy", result.get("体力", 0)) or 0),
-                    social_battery=float(result.get("social_battery", result.get("社交电量", 0)) or 0),
+                    energy=_opt_float(result.get("energy", result.get("体力"))),
+                    social_battery=_opt_float(
+                        result.get("social_battery", result.get("社交电量"))
+                    ),
                     captured_at=state_mod.now_iso(),
+                    extra=dict(result),
                 )
         except Exception:
             pass
-    paths = getattr(ctx, "paths", None)
-    if paths is not None:
-        state_dir = getattr(paths, "state_dir", None) or getattr(paths, "data_dir", None)
-        if state_dir:
-            path = Path(state_dir) / contracts.FALLBACK_LIFE_STATE_FILE
-            if path.exists():
-                try:
-                    data = json.loads(path.read_text(encoding="utf-8"))
-                    return LifeTrace(
-                        routine=str(data.get("routine", "")),
-                        mood=str(data.get("mood", "")),
-                        energy=float(data.get("energy", 0) or 0),
-                        social_battery=float(data.get("social_battery", 0) or 0),
-                        captured_at=state_mod.now_iso(),
-                    )
-                except (OSError, ValueError):
-                    pass
+    for path in _life_state_candidates(ctx):
+        if not path.exists():
+            continue
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+            return _trace_from_state(data)
+        except (OSError, ValueError):
+            continue
     return LifeTrace(captured_at=state_mod.now_iso())
 
 

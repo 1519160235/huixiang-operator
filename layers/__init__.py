@@ -25,7 +25,22 @@ B 类小黑盒读写：接入层与发布层由本插件自带的签名客户端
 待后续按 contracts.py 契约逐条接入实现。
 """
 
-from . import inbound, sense, create, guard, publish, interact, summarize, links
+from . import (
+    inbound,
+    sense,
+    create,
+    guard,
+    publish,
+    interact,
+    summarize,
+    links,
+    voices,
+    schedule,
+    topics,
+    hashtags,
+    emojis,
+    emoji_refresh,
+)
 
 # 六块执行顺序，供编排与自检使用。
 # 说明：「state」为状态/存储底座，位于顶层模块（state.py），不在本包内，
@@ -43,5 +58,11 @@ __all__ = [
     "interact",
     "summarize",
     "links",
+    "voices",
+    "schedule",
+    "topics",
+    "hashtags",
+    "emojis",
+    "emoji_refresh",
     "LAYER_ORDER",
 ]

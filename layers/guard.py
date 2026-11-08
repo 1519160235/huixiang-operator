@@ -137,7 +137,7 @@ async def check_quota(ctx: Any, mode: RunMode, action: str = "post") -> VerifyRe
     limit = _quota_limit(ctx, action)
     if limit <= 0:
         return VerifyResult(ok=True, code="quota_unlimited", message="未配置额度上限，跳过额度校验")
-    if quota.is_exhausted(mode, day, limit):
+    if quota.is_exhausted(mode, day, limit, action):
         return VerifyResult(ok=False, code="quota_exhausted", message=f"今日{action}额度已用尽（{limit}）")
     return VerifyResult(ok=True, code="quota_ok", message="额度充足")
 
@@ -188,18 +188,15 @@ async def check_ai_flavor(ctx: Any, score: float, threshold: float | None = None
 async def check_time_window(
     ctx: Any, now_minutes: int | None = None, mode: RunMode = RunMode.REAL
 ) -> VerifyResult:
-    """发帖时段闸门：不在 [publish].post_time_window 内一律拦截（纯本地）。
+    """发帖时段闸门（已停用）。
 
-    演练模式放行：演练是为了随时验证链路，不该被发帖时段挡住。
+    【2026-11-08 用户要求「既然都说了他是自己想发，那就不要设置什么时间段了」】
+    原来这里有 `post_time_window` / `post_slots` 两套时段互相打架，
+    现在时段整个取消：什么时候发由「想不想发」+ 生活状态决定。
+    这个函数保留成恒放行，是为了不破坏既有的护栏链调用顺序；
+    真正的闸门只剩额度（`daily_quota_post`）和生活状态。
     """
-    if mode is RunMode.DRY_RUN and _dry_run_no_quota_cost(ctx):
-        return VerifyResult(ok=True, code="dry_run_time_window", message="演练模式，不限制发帖时段")
-    window = _read_str(_section(ctx, "publish"), "post_time_window", "09:00-22:00") or "09:00-22:00"
-    from layers import sense
-
-    if sense.in_post_time_window(window, now_minutes):
-        return VerifyResult(ok=True, code="time_window_ok", message=f"在允许发帖时段内（{window}）")
-    return VerifyResult(ok=False, code="outside_time_window", message=f"不在允许发帖时段（{window}）")
+    return VerifyResult(ok=True, code="no_time_window", message="不限时段，想发就发")
 
 
 async def check_captcha(ctx: Any) -> VerifyResult:
@@ -218,7 +215,8 @@ async def reserve_quota(ctx: Any, mode: RunMode, action: str = "post") -> Verify
         return VerifyResult(ok=True, code="dry_run_no_quota", message="演练模式，不占额度")
     quota = _store(ctx, "quota")
     if quota is not None:
-        quota.incr(mode, state_mod.today_str(), 1)
+        # 【2026-11-07 修正】按动作分桶：评论不能把发帖额度吃掉（原来共用一个计数器）。
+        quota.incr(mode, state_mod.today_str(), 1, action)
     cursor_store = _store(ctx, "cursor")
     if cursor_store is not None:
         cursor_store.set(Cursor(name=_CURSOR_FIELD.get(action, "last_post_at"), value=str(time.time())))

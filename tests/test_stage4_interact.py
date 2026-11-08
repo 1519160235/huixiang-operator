@@ -130,6 +130,9 @@ class _FakeNotif:
         self.root_comment_id = root_id
         self.parent_comment_id = parent_id
         self.event_type = event_type
+        # 真机通知会带对方说的原文与昵称，回复要接得住话。
+        self.content = "楼主这波操作有点东西"
+        self.sender_nickname = "路人甲"
 
 
 class _FakeNotifyClient:
@@ -140,6 +143,9 @@ class _FakeNotifyClient:
         if event_type.value == "mention":
             return SimpleNamespace(items=[{"notification": _FakeNotif("n1", "p1", "", "", "mention")}])
         return SimpleNamespace(items=[{"notification": _FakeNotif("n2", "p2", "r2", "p2", "reply")}])
+
+    async def fetch_thread_context(self, post_id: str) -> SimpleNamespace:
+        return SimpleNamespace(title="测试帖子标题", body="这是一段测试帖子正文内容", image_urls=[], author_name="楼主")
 
     async def send_comment(self, route: object, text: str) -> SimpleNamespace:
         self.comments.append(route)
@@ -227,7 +233,7 @@ class TestCommentGuard(unittest.IsolatedAsyncioTestCase):
     async def test_comment_quota_exhausted(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             ctx = _make_ctx(tmp)
-            ctx.store.quota.incr(RunMode.REAL, state.today_str(), 20)
+            ctx.store.quota.incr(RunMode.REAL, state.today_str(), 20, "comment")
             result = await guard.is_commentable(ctx, "好", 0, RunMode.REAL, action="comment")
             self.assertFalse(result.ok)
             self.assertEqual(result.code, "quota_exhausted")

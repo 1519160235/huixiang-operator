@@ -170,7 +170,7 @@ class TestSummaryRewrite(unittest.TestCase):
         """装桩：生成返回 texts，护栏按 ai_scores 依次判 AI 味，发帖只记账。"""
         scores = list(ai_scores)
 
-        async def fake_gen(ctx, items, trace, max_attempts=3, rewrite_hint="", previous_text=""):
+        async def fake_gen(ctx, items, trace, max_attempts=3, rewrite_hint="", previous_text="", **_kwargs):
             self.generate_calls.append({"hint": rewrite_hint, "prev": previous_text})
             idx = min(len(self.generate_calls) - 1, len(texts) - 1)
             text = texts[idx]
@@ -219,7 +219,9 @@ class TestSummaryRewrite(unittest.TestCase):
         self._install(ai_scores=[70.0, 20.0], texts=[body, body])
         ctx = _summary_ctx([{"post_id": "p1", "title": "t", "summary": "s"}], [70.0, 20.0])
 
-        result = asyncio.run(summarize.run_summary_once(ctx, mode=RunMode.DRY_RUN))
+        result = asyncio.run(
+            summarize.run_summary_once(ctx, mode=RunMode.DRY_RUN, format_id="daily_log")
+        )
 
         self.assertTrue(result.get("ok"), result)
         self.assertEqual(result.get("rewrites"), 1, "应当记录重写了 1 次")
@@ -235,7 +237,9 @@ class TestSummaryRewrite(unittest.TestCase):
         self._install(ai_scores=[80.0] * 10, texts=[body] * 10)
         ctx = _summary_ctx([{"post_id": "p1", "title": "t", "summary": "s"}], [80.0] * 10)
 
-        result = asyncio.run(summarize.run_summary_once(ctx, mode=RunMode.DRY_RUN))
+        result = asyncio.run(
+            summarize.run_summary_once(ctx, mode=RunMode.DRY_RUN, format_id="daily_log")
+        )
 
         self.assertFalse(result.get("ok"))
         self.assertEqual(result.get("code"), "ai_flavor_block")
@@ -254,7 +258,9 @@ class TestSummaryRewrite(unittest.TestCase):
         summarize.guard.is_publishable = fake_publishable
         ctx = _summary_ctx([{"post_id": "p1", "title": "t", "summary": "s"}], [10.0])
 
-        result = asyncio.run(summarize.run_summary_once(ctx, mode=RunMode.DRY_RUN))
+        result = asyncio.run(
+            summarize.run_summary_once(ctx, mode=RunMode.DRY_RUN, format_id="daily_log")
+        )
 
         self.assertFalse(result.get("ok"))
         self.assertEqual(result.get("code"), "post_gap")

@@ -76,11 +76,18 @@ class LifeTrace:
 
 @dataclass
 class Partition:
-    """分区：发帖时必须落到的板块目录项。"""
+    """分区 / 社区：发帖时要勾选的板块。
 
-    id: int = 0                       # 分区 ID（数字）
+    【2026-11-08】小黑盒发帖接口的 `topic_ids` 就是这个 id ——
+    发帖时可以勾多个社区，接口原话「正确勾选可增加曝光展示机会」。
+    所以发帖要凑够几个相关社区，而不是只挂一个。
+    """
+
+    id: int = 0                       # 分区 ID（就是发帖时的 topic_id）
     name: str = ""                    # 分区中文名
-    topic_ids: list[int] = field(default_factory=list)  # 该分区下可选话题 ID（内部 list[int]）
+    topic_ids: list[int] = field(default_factory=list)  # 预留：分区下可选话题 ID
+    group: str = ""                   # 所属分组（盒友之家 / 网游竞技 / 单机热游…），用于补同组社区
+    heat: float = 0.0                 # 热度，用于补位时挑热门
     # 契约备忘：topicIds 在小黑盒接口是「逗号分隔的数字字符串」（如 "12,34,56"），
     # 不是 int 数组；本字段内部用 list[int]，发布层负责拼成逗号字符串（见 contracts.py）。
 
@@ -117,7 +124,11 @@ class PostDraft:
     text: str = ""                                    # 正文（图片以 img 段内嵌于此）
     link_tag: LinkTag = LinkTag.IMAGE_TEXT            # 发布类型：图文=27 / 动态(无图)=28 / 文章=11
     partition: Partition | None = None                # 目标分区
-    topic_ids: list[int] = field(default_factory=list)  # 话题 ID（内部 list[int]；发布时拼成逗号分隔字符串）
+    topic_ids: list[int] = field(default_factory=list)  # 分区/社区 ID（发布时拼成逗号分隔字符串）
+    # 【2026-11-08】话题（hashtag）和分区不是一回事：
+    # 分区是「发到哪个板块」，话题是帖子上的 #标签（如 deepseek / 盒友日常）。
+    # 小黑盒发帖接口的 `hashtags` 字段收的是**话题名数组**，不是 id。
+    hashtags: list[str] = field(default_factory=list)
     images: list[ImageAsset] = field(default_factory=list)
     polished: bool = False                            # 是否已过中文口语清洗
     ai_flavor_score: float = 0.0                      # AI 味打分（越高越像机器，护栏层据此拦截）
@@ -133,6 +144,32 @@ class CommentTarget:
     parent_id: str | None = None      # 直接回复的那条评论 ID（楼中楼里 parent ≠ root）
     floor: int | None = None          # 目标楼层号（可选）
     reply_to: str | None = None       # 被回复用户标识（可选）
+
+    # ---- 帖子内容：评论必须依据这些字段，否则生成的内容与帖子无关 ----
+    # 【真机缺陷 2026-11-06】评论提示词里原本只有一句「你在小黑盒上看到一条帖子」，
+    # 既没传标题也没传正文，模型只能凭空编 —— 用户反馈「回复的跟帖子一点关系都没有」。
+    title: str = ""                   # 帖子标题
+    body: str = ""                    # 帖子正文 / 摘要
+    author_name: str = ""             # 作者昵称（回复时可称呼）
+    image_desc: str = ""              # 图片内容描述（视觉模型识别结果，可空）
+    comment_text: str = ""            # 被回复的那条评论原文（回复通知时有值）
+    # 该帖子下别人已经发过的评论（抓前 N 条）。
+    # 【用户要求 2026-11-07】「你再看一下其他人评论的啥，你再结合一下，
+    #  别人评论一个方面你一个人单独评论一个方面」——
+    #  不看评论区就永远在自说自话，而且容易和别人撞话题。
+    existing_comments: list[str] = field(default_factory=list)
+
+    # ---- 社区语境：判断「这是哪款游戏的帖子」，决定用什么黑话 ----
+    # 【真机缺陷 2026-11-07 用户报障「评论不涉及游戏黑话，人家一眼就辨别出来了」】
+    # 小黑盒推荐流里 `topics` / `hashtags` 已给出分区与标签（如「鸣潮」「原神」「盒友杂谈」），
+    # 解析器也产出了 section_names，但业务层一直没接住，提示词里完全没有「哪款游戏」。
+    # 模型只能照着标题字面瞎评，圈内人一看就知道是外人。
+    #
+    # 【不自建黑话库】宿主框架自带黑话系统（MaiBot.db 的 `jargons` 表 + is_global 全局作用域），
+    # 这里只做「读宿主已有的黑话」，不另起一套词典。
+    section_names: list[str] = field(default_factory=list)  # 分区 + 话题标签
+    game_name: str = ""               # 识别出的游戏名（由 section_names / 标题推断）
+    jargon_hint: str = ""             # 命中宿主黑话表后的「词：含义」提示（由 runtime 填充）
 
 
 @dataclass
@@ -175,6 +212,18 @@ class BrowseItem:
     author_name: str = ""             # 作者名
     heat: float = 0.0                 # 热度
     published_at: str = ""            # 发布时间（ISO 字符串）
+    # 帖子配图 URL。
+    # 【真机缺陷 2026-11-06】上游解析器（vendor/parsers.py 的 _feed_image_urls）
+    # 早就把图片地址解析成 image_urls 了，但这里没有对应字段，接入层也没接，
+    # 于是图片信息在进入业务层的第一步就被丢掉 —— 评论只能对着标题瞎猜。
+    image_urls: list[str] = field(default_factory=list)
+    # 图片内容理解结果（文字描述）。由创作层按需调用视觉模型填充，
+    # 失败留空，调用方按「没有图片信息」降级处理，不影响主流程。
+    image_desc: str = ""
+    # 分区 + 话题标签（小黑盒 topics/hashtags 合并）。
+    # 【真机缺陷 2026-11-07】这是判断「这是哪款游戏的帖子」最可靠的依据，
+    # 解析器已产出 section_names，业务层必须接住，否则评论说不出圈内话。
+    section_names: list[str] = field(default_factory=list)
     raw: dict[str, Any] = field(default_factory=dict)  # 原始数据，预留扩展
 
 

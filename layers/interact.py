@@ -15,6 +15,7 @@
 
 from __future__ import annotations
 
+import inspect
 import random
 from typing import Any
 
@@ -77,6 +78,54 @@ def pick_comment_targets(
 
 # ===================== 编排 =====================
 
+async def _reply_target(ctx: Any, notif: Any) -> CommentTarget:
+    """把一条通知整理成「带上下文的回复目标」。
+
+    通知本身只有「谁说了什么」，没有帖子内容。这里回查帖子，
+    再按需识别配图，让回复能真正接上话。
+    【真机缺陷 2026-11-06】原实现只取 post_id 就去生成回复，
+    提示词里既没有帖子内容也没有对方评论，回复必然跑题。
+    """
+    post_id = str(getattr(notif, "post_id", "") or "")
+    target = CommentTarget(
+        post_id=post_id,
+        # 对方说的那句话：回复要接得住，必须原样带给模型。
+        comment_text=str(getattr(notif, "content", "") or ""),
+        author_name=str(getattr(notif, "sender_nickname", "") or ""),
+        root_id=str(getattr(notif, "root_comment_id", "") or "") or None,
+        parent_id=str(getattr(notif, "parent_comment_id", "") or "") or None,
+    )
+
+    post_ctx = await inbound.fetch_post_context(ctx, post_id)
+    if post_ctx is not None:
+        target.title = str(getattr(post_ctx, "title", "") or "")
+        target.body = str(getattr(post_ctx, "body", "") or "")
+        images = list(getattr(post_ctx, "image_urls", []) or [])
+        if images and len(target.body) < 30:
+            describe = getattr(ctx, "describe_image", None)
+            if callable(describe):
+                try:
+                    got = describe(images[0], target.title)
+                    if inspect.isawaitable(got):
+                        got = await got
+                    target.image_desc = str(got or "").strip()
+                except Exception:  # noqa: BLE001 —— 识图失败按没有图处理。
+                    target.image_desc = ""
+    # 回复同样要说圈内话：认游戏 + 捞宿主的黑话。
+    # 通知回查拿不到分区标签，就靠标题/正文/识图描述推断。
+    target.game_name = create._guess_game_name([], target.title, target.body, target.image_desc)
+    lookup = getattr(ctx, "look_up_jargon", None)
+    if callable(lookup):
+        try:
+            got = lookup([target.title, target.body, target.image_desc, target.comment_text])
+            if inspect.isawaitable(got):
+                got = await got
+            target.jargon_hint = str(got or "").strip()
+        except Exception:  # noqa: BLE001
+            target.jargon_hint = ""
+    return target
+
+
 async def respond_to_notifications(ctx: Any, mode: RunMode = RunMode.DRY_RUN) -> dict:
     """收 @ / 回复通知 → 去重 → 生成回复 → 过评论护栏 → 回帖（楼中楼带 rootId）。"""
     store = getattr(ctx, "store", None)
@@ -99,8 +148,10 @@ async def respond_to_notifications(ctx: Any, mode: RunMode = RunMode.DRY_RUN) ->
             if notification_store is not None:
                 notification_store.mark(nid)  # 不需要响应的通知也标记，避免反复拉取
             continue
-        target = CommentTarget(post_id=str(getattr(notif, "post_id", "") or ""))
-        text = await create.generate_comment(ctx, target, trace)
+        target = await _reply_target(ctx, notif)
+        text = await create.generate_comment(ctx, target, trace, for_reply=True)
+        if not str(text or "").strip():
+            continue
         score = create.ai_flavor_score(text)
         verdict = await guard.is_commentable(ctx, text, score, mode, action="reply")
         if not verdict.ok:
@@ -134,10 +185,18 @@ async def interact_with_feeds(ctx: Any, mode: RunMode = RunMode.DRY_RUN) -> dict
     trace = await sense.read_life_trace(ctx)
     sent = 0
     for item in targets:
-        target = CommentTarget(post_id=str(getattr(item, "post_id", "") or ""))
+        # 先把帖子的标题 / 正文 / 配图内容凑齐，再交给模型写评论。
+        # 【真机缺陷 2026-11-06】原来这里只传了一个 post_id，提示词里没有任何
+        # 帖子内容，模型只能凭空编，导致「回复跟帖子一点关系都没有」。
+        target = await create.enrich_comment_target(ctx, item)
         if not target.post_id:
             continue
+        if not (target.title or target.body or target.image_desc):
+            # 一点素材都没有，宁可跳过也不发无关内容。
+            continue
         text = await create.generate_comment(ctx, target, trace)
+        if not str(text or "").strip():
+            continue
         score = create.ai_flavor_score(text)
         verdict = await guard.is_commentable(ctx, text, score, mode, action="comment")
         if not verdict.ok:

@@ -17,6 +17,7 @@
 
 from __future__ import annotations
 
+import json
 import sys
 import tempfile
 import unittest
@@ -222,6 +223,62 @@ class TestWebuiDeclaration(unittest.TestCase):
         # custom 页必须在 capabilities 里声明
         if any(p.get("mode") == "custom" for p in pages):
             self.assertIn("custom_pages", data.get("required_capabilities", []))
+
+
+class TestWebUIIsDeclarative(unittest.TestCase):
+    """后台页必须用宿主原生声明式组件，不自建 HTML（2026-11-07）。
+
+    【为什么立这条规矩】
+    我先前用 custom 页写了一整页自建 HTML + CSS，等于「在框架里又造了个网页」：
+    样式与宿主脱节、观感廉价，还得自己实现页签/导航（做成了滚动跳转，点了就整页滑）。
+    框架本身支持 `tabs` / `card` / `grid` / `stat` / `table` / `button` 等原生组件，
+    由宿主按自己设计系统渲染，天然贴合主题，也不该重复造配置表单
+    （配置项由 config_model 自动生成原生表单）。
+    """
+
+    def setUp(self) -> None:
+        self.data = json.loads((ROOT / "webui.json").read_text(encoding="utf-8"))
+
+    def test_all_pages_are_declarative(self) -> None:
+        for page in self.data["pages"]:
+            self.assertEqual(page.get("mode"), "declarative", f"页面 {page.get('id')} 不是声明式")
+            self.assertNotIn("entry", page, "声明式页面不该有 entry")
+            self.assertIn("content", page, "声明式页面必须有 content")
+
+    def test_no_custom_pages_capability(self) -> None:
+        self.assertNotIn("custom_pages", self.data.get("required_capabilities", []))
+
+    def test_uses_native_tabs_not_self_made_nav(self) -> None:
+        # 页签必须用宿主的 tabs 组件，而不是自己写按钮 + 滚动。
+        page = self.data["pages"][0]
+        types = self._collect_types(page["content"])
+        self.assertIn("tabs", types, "应当用宿主原生 tabs 做页签切换")
+        self.assertNotIn("button", [t for t in types if t == "anchor"], "不该出现自定义锚点")
+
+    def test_config_form_not_duplicated(self) -> None:
+        # 配置由 config_model 自动生成原生表单，页面里不该再查配置 schema 自己画。
+        page = self.data["pages"][0]
+        self.assertNotIn("config_schema", page.get("queries", {}))
+        self.assertNotIn("get_config", page.get("queries", {}))
+        self.assertNotIn("save_config", page.get("actions", {}))
+
+    def test_no_absolute_paths_in_content(self) -> None:
+        blob = json.dumps(self.data, ensure_ascii=False)
+        self.assertNotIn("E:\\\\", blob)
+        self.assertNotIn("/mai/", blob)
+
+    @staticmethod
+    def _collect_types(nodes) -> set[str]:
+        out: set[str] = set()
+        for node in nodes:
+            if not isinstance(node, dict):
+                continue
+            t = node.get("type")
+            if isinstance(t, str):
+                out.add(t)
+            for child in node.get("children") or []:
+                out |= TestWebUIIsDeclarative._collect_types([child])
+        return out
 
 
 if __name__ == "__main__":

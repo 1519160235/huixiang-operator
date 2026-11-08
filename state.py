@@ -63,10 +63,18 @@ DRY_RUN_QUOTA_PREFIX = "quota:dry_run"
 REAL_QUOTA_PREFIX = "quota:real"
 
 
-def quota_bucket_key(mode: RunMode, day: str) -> str:
-    """生成每日额度分桶键，不同 mode 一定得到不同键（演练 / 真实隔离的根基）。"""
+def quota_bucket_key(mode: RunMode, day: str, action: str = "post") -> str:
+    """生成每日额度分桶键：mode + 日期 + 动作三者隔离。
+
+    【真机缺陷 2026-11-07 用户报障「发帖子要配图，图没了」的连带根因】
+    原实现只按「mode + 日期」分桶，不区分动作 —— 评论 / 回复 / 点赞全都加进
+    同一个计数器，而 `check_quota(action="post")` 又拿它跟 `daily_quota_post=3` 比。
+    结果：评论发得多一点，发帖额度就被「挤爆」，当天再也发不出帖子（也就不可能配图）。
+    现在每个动作一个独立桶：`quota:real:2026-11-07:post`。
+    """
     prefix = DRY_RUN_QUOTA_PREFIX if mode is RunMode.DRY_RUN else REAL_QUOTA_PREFIX
-    return f"{prefix}:{day}"
+    act = str(action or "post").strip() or "post"
+    return f"{prefix}:{day}:{act}"
 
 
 def today_str() -> str:
@@ -172,27 +180,46 @@ class CursorStore:
 # ===================== 额度存储接口 =====================
 
 class QuotaStore:
-    """每日额度存储：按 quota_bucket_key(mode, day) 分桶读写，演练 / 真实互不写串。"""
+    """每日额度存储：按 quota_bucket_key(mode, day, action) 分桶，模式 / 动作互不写串。"""
 
     def __init__(self, data_dir: Path) -> None:
         self._kv = _JsonKV(data_dir / "quota.json")
 
-    def get(self, mode: RunMode, day: str) -> QuotaCount:
-        key = quota_bucket_key(mode, day)
+    def get(self, mode: RunMode, day: str, action: str = "post") -> QuotaCount:
+        key = quota_bucket_key(mode, day, action)
         used = int(self._kv.read().get(key, 0))
         return QuotaCount(mode=mode, day=day, used=used, limit=0)
 
-    def incr(self, mode: RunMode, day: str, amount: int = 1) -> QuotaCount:
-        key = quota_bucket_key(mode, day)
+    def incr(self, mode: RunMode, day: str, amount: int = 1, action: str = "post") -> QuotaCount:
+        key = quota_bucket_key(mode, day, action)
         data = self._kv.read()
         used = int(data.get(key, 0)) + amount
         data[key] = used
         self._kv.write(data)
         return QuotaCount(mode=mode, day=day, used=used, limit=0)
 
-    def is_exhausted(self, mode: RunMode, day: str, limit: int = 0) -> bool:
-        """判断某模式某天额度是否已用尽（limit 由护栏层从配置注入）。"""
-        return self.get(mode, day).used >= max(0, int(limit))
+    def is_exhausted(self, mode: RunMode, day: str, limit: int = 0, action: str = "post") -> bool:
+        """判断某模式某天某动作的额度是否已用尽（limit 由护栏层从配置注入）。"""
+        return self.get(mode, day, action).used >= max(0, int(limit))
+
+    def reset(self, mode: RunMode, day: str, action: str = "post") -> QuotaCount:
+        """把某模式某天某动作的额度清零（测试占用后手动复位用）。
+
+        只删该分桶键，不碰其它日期 / 其它模式 / 其它动作的桶；读回退到 0，等价于清零。
+        """
+        key = quota_bucket_key(mode, day, action)
+        data = self._kv.read()
+        data.pop(key, None)
+        self._kv.write(data)
+        return QuotaCount(mode=mode, day=day, used=0, limit=0)
+
+    def reset_all(self, mode: RunMode, day: str) -> int:
+        """把某模式某天所有动作的额度一起清零，返回清零前各桶总和。"""
+        total = 0
+        for action in ("post", "comment", "like", "reply"):
+            total += self.get(mode, day, action).used
+            self.reset(mode, day, action)
+        return total
 
 
 # ===================== 去重存储接口 =====================
@@ -325,11 +352,17 @@ class PartitionCacheStore:
         result: list[Partition] = []
         for item in raw:
             if isinstance(item, dict):
+                try:
+                    heat = float(item.get("heat", 0) or 0)
+                except (TypeError, ValueError):
+                    heat = 0.0
                 result.append(
                     Partition(
                         id=int(item.get("id", 0)),
                         name=str(item.get("name", "")),
                         topic_ids=[int(t) for t in item.get("topic_ids", []) if str(t).isdigit()],
+                        group=str(item.get("group", "") or ""),
+                        heat=heat,
                     )
                 )
         return result
@@ -337,7 +370,14 @@ class PartitionCacheStore:
     def set(self, partitions: list[Partition]) -> None:
         data = self._kv.read()
         data["partitions"] = [
-            {"id": p.id, "name": p.name, "topic_ids": p.topic_ids} for p in partitions
+            {
+                "id": p.id,
+                "name": p.name,
+                "topic_ids": p.topic_ids,
+                "group": p.group,
+                "heat": p.heat,
+            }
+            for p in partitions
         ]
         data["last_refresh_at"] = now_iso()
         self._kv.write(data)
@@ -473,6 +513,15 @@ class BrowseDigestStore:
         """未被总结消费的浏览条数（触发判定用）。"""
         return len(self.pending())
 
+    def recent_post_ids(self, limit: int = 8) -> list[str]:
+        """最近刷到的帖子 ID（按刷到时间倒序，含已总结的）。
+
+        表情白名单采样要用：已总结的老帖子评论区里同样可能有新表情。
+        """
+        rows = [v for v in self._items().values() if isinstance(v, dict)]
+        rows.sort(key=lambda v: float(v.get("seen_ts", 0) or 0), reverse=True)
+        return [str(v.get("post_id", "")) for v in rows[: max(1, int(limit))] if v.get("post_id")]
+
     def pending_count_since(self, since_ts: float) -> int:
         """指定时间点之后刷到、且未被消费的条数。"""
         return sum(
@@ -567,6 +616,60 @@ class ActionLogStore:
 
 # ===================== 存储容器（把各 Store 一次装齐） =====================
 
+class PostHistoryStore:
+    """发帖历史：记住最近发过的标题与体裁，供下次生成时避开重复。
+
+    【真机缺陷 2026-11-08 用户报障「连续发三个，题目一模一样」】
+    原来发帖完全没有历史概念：每次都是同一道提示词、同一批素材风格，
+    模型自然给出同一个句式。这里把「最近发过什么标题、用的什么体裁」存下来，
+    生成前喂给模型、生成后再做相似度校验。
+
+    结构：{"items": [{post_id,title,format,chars,at,ts}]}，最多 max_entries 条（旧→新）。
+    """
+
+    def __init__(self, data_dir: Path, max_entries: int = 60) -> None:
+        self._kv = _JsonKV(data_dir / "post_history.json")
+        self.max_entries = max(1, int(max_entries))
+
+    def _items(self) -> list[dict[str, Any]]:
+        rows = self._kv.read().get("items", [])
+        if not isinstance(rows, list):
+            return []
+        return [dict(row) for row in rows if isinstance(row, dict)]
+
+    def add(self, *, post_id: str = "", title: str = "", format_id: str = "", chars: int = 0) -> None:
+        """记一条发过的帖子（只在真正发布成功后调用）。"""
+        rows = self._items()
+        rows.append(
+            {
+                "post_id": str(post_id or ""),
+                "title": str(title or ""),
+                "format": str(format_id or ""),
+                "chars": int(chars or 0),
+                "at": now_iso(),
+                "ts": time.time(),
+            }
+        )
+        if len(rows) > self.max_entries:
+            rows = rows[-self.max_entries :]
+        self._kv.write({"items": rows})
+
+    def recent(self, limit: int = 8) -> list[dict[str, Any]]:
+        """最近若干条（新的在前）。"""
+        rows = self._items()
+        rows.reverse()
+        return rows[: max(1, int(limit))]
+
+    def recent_titles(self, limit: int = 6) -> list[str]:
+        return [str(r.get("title") or "") for r in self.recent(limit) if str(r.get("title") or "")]
+
+    def recent_formats(self, limit: int = 5) -> list[str]:
+        """最近的体裁（旧的在前，便于 pick_format 判断谁最久没用）。"""
+        rows = self.recent(limit)
+        rows.reverse()
+        return [str(r.get("format") or "") for r in rows if str(r.get("format") or "")]
+
+
 class StoreContainer:
     """把各 Store 一次装齐，供六块共用（演练 / 真实隔离由各 Store 自己保证）。
 
@@ -587,6 +690,7 @@ class StoreContainer:
         self.login = LoginStore(data_dir)
         self.notification = NotificationStore(data_dir)
         self.digest = BrowseDigestStore(data_dir)
+        self.post_history = PostHistoryStore(data_dir)
         self.action_log = ActionLogStore(data_dir)
 
 
@@ -609,6 +713,7 @@ __all__ = [
     "CircuitBreakerStore",
     "NotificationStore",
     "BrowseDigestStore",
+    "PostHistoryStore",
     "ActionLogStore",
     "StoreContainer",
 ]

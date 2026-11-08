@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import time
 from typing import Any, Awaitable, Callable
 
 from models import RunMode
@@ -29,6 +30,11 @@ from layers import sense
 from layers._cfg import read_int, section
 
 logger = logging.getLogger(__name__)
+
+# 表情白名单刷新周期：一天一次足够（新表情不是天天有）。
+EMOJI_REFRESH_SECONDS = 24 * 3600
+# 话题池采样周期：话题变化比表情慢，一天一次也够。
+HASHTAG_SAMPLE_SECONDS = 24 * 3600
 
 
 class OpsWorker:
@@ -128,8 +134,82 @@ class OpsWorker:
         result["browse"] = await self._step("browse", self.plugin.run_browse_once)
         result["interact"] = await self._step("interact", self.plugin.run_interact_once)
         result["summary"] = await self._step("summary", self.plugin.run_summary_once)
+        result["emoji_refresh"] = await self._maybe_refresh_emoji()
+        result["hashtag_sample"] = await self._maybe_sample_hashtags()
         self.last_result = result
         return result
+
+    async def _maybe_sample_hashtags(self) -> dict[str, Any]:
+        """每天从推荐流里采一次话题（hashtag）到池子。
+
+        小黑盒没有公开的话题列表接口，`/bbs/app/api/topic/index/` 返回的是分区树。
+        所以照表情白名单的办法：别人帖子上挂的 hashtags 一定真实存在，抄下来即可。
+        失败只记 debug，不影响发帖（没话题就按没有发）。
+        """
+        store = getattr(getattr(self.ctx, "store", None), "cursor", None)
+        if store is None:
+            return {"ok": False, "code": "no_cursor"}
+        now = time.time()
+        try:
+            last = float(store.get("hashtags_sampled_at").value or 0)
+        except Exception:  # noqa: BLE001
+            last = 0.0
+        if last and now - last < HASHTAG_SAMPLE_SECONDS:
+            return {"ok": True, "skipped": True, "code": "not_due"}
+
+        from layers import hashtags
+
+        try:
+            outcome = await hashtags.sample_from_feed(self.ctx, limit=2)
+        except Exception as exc:  # noqa: BLE001 —— 采样失败绝不影响主流程。
+            logger.debug("回响：话题采样失败（已忽略）：%s", exc)
+            return {"ok": False, "code": "sample_error"}
+        if outcome.get("ok"):
+            try:
+                from models import Cursor
+
+                store.set(Cursor(name="hashtags_sampled_at", value=str(now)))
+            except Exception:  # noqa: BLE001
+                pass
+        return outcome
+
+    async def _maybe_refresh_emoji(self) -> dict[str, Any]:
+        """每 24 小时采一次真实评论，把新表情并入白名单。
+
+        小黑盒会持续上新表情，写死的名单迟早过期。采样只在刷过的帖子上做，
+        不额外发请求探接口；任何失败都只降级成一条 debug，不影响发帖。
+        """
+        store = getattr(getattr(self.ctx, "store", None), "cursor", None)
+        if store is None:
+            return {"ok": False, "code": "no_cursor"}
+        last = 0.0
+        try:
+            cursor = store.get("emoji_whitelist_refreshed_at")
+            if cursor.value:
+                last = float(cursor.value)
+        except Exception:  # noqa: BLE001
+            last = 0.0
+        now = time.time()
+        if last and now - last < EMOJI_REFRESH_SECONDS:
+            return {"ok": True, "skipped": True, "code": "not_due"}
+
+        from layers import emoji_refresh
+
+        try:
+            outcome = await emoji_refresh.refresh_once(self.ctx)
+        except Exception as exc:  # noqa: BLE001 —— 采样失败绝不影响主流程。
+            logger.debug("回响：表情白名单刷新失败（已忽略）：%s", exc)
+            return {"ok": False, "code": "refresh_error"}
+        if outcome.get("ok"):
+            try:
+                from models import Cursor
+
+                store.set(Cursor(name="emoji_whitelist_refreshed_at", value=str(now)))
+            except Exception:  # noqa: BLE001
+                pass
+            if outcome.get("added"):
+                self._log("emoji_refresh", True, f"新增 {outcome['added']} 个表情", outcome)
+        return outcome
 
     async def _step(self, name: str, runner: Callable[..., Awaitable[dict]]) -> dict[str, Any]:
         """跑一个子步骤：成功失败都写操作记录，绝不向外抛异常。"""

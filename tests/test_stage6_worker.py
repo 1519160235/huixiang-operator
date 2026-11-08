@@ -91,18 +91,14 @@ class TestTimeWindowGuard(unittest.IsolatedAsyncioTestCase):
             result = await guard.check_time_window(ctx, now_minutes=3 * 60, mode=RunMode.DRY_RUN)
             self.assertTrue(result.ok)
 
-    async def test_real_blocks_outside_window(self) -> None:
+    async def test_real_ignores_window_too(self) -> None:
+        # 用户 2026-11-08：「既然都说了他是自己想发，那就不要设置什么时间段了」
+        # 真实模式半夜也不再拦（生活状态那条闸还在，见 schedule._life_blocked）。
         with tempfile.TemporaryDirectory() as tmp:
-            ctx = _make_ctx(tmp, {"guard": {"dry_run_no_quota_cost": True}, "publish": {"post_time_window": "09:00-10:00"}})
+            ctx = _make_ctx(tmp, {"guard": {"dry_run_no_quota_cost": True}})
             result = await guard.check_time_window(ctx, now_minutes=3 * 60, mode=RunMode.REAL)
-            self.assertFalse(result.ok)
-            self.assertEqual(result.code, "outside_time_window")
-
-    async def test_real_passes_inside_window(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp:
-            ctx = _make_ctx(tmp, {"guard": {"dry_run_no_quota_cost": True}, "publish": {"post_time_window": "09:00-10:00"}})
-            result = await guard.check_time_window(ctx, now_minutes=9 * 60 + 30, mode=RunMode.REAL)
             self.assertTrue(result.ok)
+            self.assertEqual(result.code, "no_time_window")
 
 
 # ===================== 操作记录 =====================
