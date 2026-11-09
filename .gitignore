@@ -6,3 +6,5 @@ __pycache__/
 credentials.json
 # 运行时配置：由宿主按 config_model 生成，不入库（插件市场要求根目录不能有 config.toml）
 config.toml
+# 本地跑自动化时这里会落记忆文件，不属插件源码
+.workbuddy/
