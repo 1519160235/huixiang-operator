@@ -1333,6 +1333,7 @@ async def generate_comment(
     trace: LifeTrace,
     *,
     for_reply: bool = False,
+    avoid_texts: list[str] | None = None,
 ) -> str:
     """生成一条评论文本（口语化短评）。
 
@@ -1408,6 +1409,16 @@ async def generate_comment(
             "或者就着他们说的那个点讲自己的情况。\n"
             "**绝对不要另起一个新话题**：如果有人在聊价格，你就聊价格；"
             "有人在聊玩法，你就聊玩法。突然岔到无关的事，一眼就能看出你不在局里。"
+        )
+
+    # 【真机缺陷 2026-11-09 用户报障「一个评论重复了好几个」】
+    # 别人连发几条时，模型容易把「谢谢」「好家伙」这类应对话反复用。
+    # 把本轮已经说过的句子直接列给模型，要求换说法。
+    avoid = [str(t).strip() for t in (avoid_texts or []) if str(t or "").strip()]
+    if avoid:
+        parts.append(
+            "这轮你已经说过这些话了，**不要再重复同样的说法**，换一个角度或换一句：\n"
+            + "\n".join(f"- {t[:60]}" for t in avoid[:8])
         )
 
     parts.append(

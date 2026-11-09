@@ -186,6 +186,14 @@ class HuiXiangPlugin(MaiBotPlugin):
         except Exception as exc:  # noqa: BLE001 —— 白名单加载失败不该影响插件启动。
             self.ctx.logger.warning("回响：表情白名单加载失败（已忽略）：%s", exc)
 
+        # 恢复「必须单独发布」的分区名单（发帖踩坑时学到的，落在这里免得重启又踩）。
+        try:
+            from layers import topics as topics_mod
+
+            topics_mod.load_exclusive(self.ctx)
+        except Exception as exc:  # noqa: BLE001
+            self.ctx.logger.warning("回响：独占分区名单加载失败（已忽略）：%s", exc)
+
         enabled = self.cfg().basic.enabled
         self.ctx.logger.info(
             "回响：插件已加载（enabled=%s，mode=%s，数据目录=%s）。",

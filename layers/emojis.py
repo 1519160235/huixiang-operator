@@ -130,14 +130,51 @@ def normalize_marks(text: str) -> str:
     return _BRACKETED_RE.sub(lambda m: f"[{m.group(1)}]", str(text or ""))
 
 
+def _rescue_bare_marks(text: str) -> str:
+    """把「没有括号但名字在白名单里」的写法补成合法标记。
+
+    `今天真累cube_doge` → `今天真累[cube_doge]`。
+    只认白名单里的名字；认不出来的原样留着，交给后面的残渣清理。
+    """
+    names = allowed_names()
+    if not names:
+        return text
+    # 长名字优先，避免 `cube_笑` 截胡 `cube_笑死我了`。
+    for name in sorted(names, key=len, reverse=True):
+        idx = text.find(name)
+        while idx != -1:
+            before = text[idx - 1] if idx > 0 else ""
+            after_idx = idx + len(name)
+            after = text[after_idx] if after_idx < len(text) else ""
+            # 已在括号里的不动（normalize_marks 已经处理过括号形态）。
+            # 注意别写成 `after in "]】）)"`：空串是任何串的子串，
+            # 结尾处的表情会被误判成「已在括号里」而跳过（踩过）。
+            wrapped = (bool(before) and before in "[【（(") or (bool(after) and after in "]】）)")
+            if wrapped:
+                idx = text.find(name, idx + 1)
+                continue
+            text = text[:idx] + f"[{name}]" + text[after_idx:]
+            idx = text.find(name, idx + len(name) + 2)
+    return text
+
+
 def sanitize_marks(text: str, *, max_marks: int = 1) -> str:
     """只保留白名单内的表情标记，其余删除，并限制条数。
 
     - 白名单外：删（不猜、不映射 —— 猜错名字同样渲染不出来）；
     - 超过 `max_marks`：删掉多余的；
-    - 半残写法（缺括号 / 空格）：一并清理，避免在小黑盒里露出 `[cube_` 这种残渣。
+    - 缺括号但名字在白名单里（`今天真累cube_doge`）：**补上括号保住表情**。
+
+    【真机缺陷 2026-11-09 用户报障「有几个评论还是带了 cube 标语」】
+    原来这条一律按「残渣」删掉，两个后果：
+      1. 模型写 `累cube_无语` 时，`cube_无语` 被抹掉，评论里只剩下半句；
+      2. 极端情况下整条评论被清成空串，上层看到的是「正文没生成」——
+         用户说的「他说正文没生成」，很大一部分就是这么来的。
+    现在的做法：先在**白名单里**做一次前缀匹配，能认出来的补括号保留，
+    认不出来才当残渣删。宁可删一个字，也不能让表情把半句话吃掉。
     """
     t = normalize_marks(text)
+    t = _rescue_bare_marks(t)
 
     kept: list[str] = []
 

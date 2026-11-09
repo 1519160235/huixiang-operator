@@ -16,12 +16,15 @@
 from __future__ import annotations
 
 import inspect
+import logging
 import random
 from typing import Any
 
 from models import CommentTarget, RunMode
 
 from . import create, guard, inbound, publish, sense
+logger = logging.getLogger(__name__)
+
 from ._cfg import read_bool as _read_bool, read_int as _read_int, read_list as _read_list, read_str as _read_str, section as _section
 
 
@@ -138,6 +141,14 @@ async def respond_to_notifications(ctx: Any, mode: RunMode = RunMode.DRY_RUN) ->
         notifs.extend(await inbound.fetch_notifications(ctx, "reply"))
     trace = await sense.read_life_trace(ctx)
     handled = 0
+    # 【真机缺陷 2026-11-09 用户报障「一个评论重复了好几个，可能是别人连续评论了好多」】
+    # 同一个人短时间内连发几条，会推来好几条通知。原来逐条独立回复，
+    # 于是同一个帖子里出现「谢谢」「谢谢」「谢谢」这种连珠炮 —— 真人不会这么说话。
+    # 现在的规矩：
+    #   1. 同一个 (帖子, 楼层, 人) 这一轮只回一次，后面的先不追；
+    #   2. 本轮已经说过的句子，生成时明确告诉模型「这些说过了，换个说法」。
+    replied_keys: set[tuple[str, str, str]] = set()
+    said_this_round: list[str] = []
     for notif in notifs:
         nid = str(getattr(notif, "notification_id", "") or getattr(notif, "external_event_id", "") or "")
         if not nid:
@@ -148,10 +159,28 @@ async def respond_to_notifications(ctx: Any, mode: RunMode = RunMode.DRY_RUN) ->
             if notification_store is not None:
                 notification_store.mark(nid)  # 不需要响应的通知也标记，避免反复拉取
             continue
+
+        # 同一帖子里同一个人连着发的，只在第一层楼回一次，别一句一句追着说。
+        key = (
+            str(getattr(notif, "post_id", "") or ""),
+            str(getattr(notif, "root_comment_id", "") or ""),
+            str(getattr(notif, "sender_uid", "") or ""),
+        )
+        if key[0] and key in replied_keys:
+            logger.info("回响：同一楼层这个人已经回过了，跳过这条（避免连珠炮）")
+            if notification_store is not None:
+                notification_store.mark(nid)
+            continue
+
         target = await _reply_target(ctx, notif)
-        text = await create.generate_comment(ctx, target, trace, for_reply=True)
+        text = await create.generate_comment(
+            ctx, target, trace, for_reply=True, avoid_texts=said_this_round
+        )
         if not str(text or "").strip():
             continue
+        if key[0]:
+            replied_keys.add(key)
+        said_this_round.append(str(text).strip())
         score = create.ai_flavor_score(text)
         verdict = await guard.is_commentable(ctx, text, score, mode, action="reply")
         if not verdict.ok:
@@ -184,28 +213,43 @@ async def interact_with_feeds(ctx: Any, mode: RunMode = RunMode.DRY_RUN) -> dict
     targets = pick_comment_targets(items, _max_comments_per_round(ctx))
     trace = await sense.read_life_trace(ctx)
     sent = 0
+    # 【真机缺陷 2026-11-09 用户报障「有的时候评论记录里说正文没生成」】
+    # 原来每条跳过都只是 `continue`，上层只看到 comments_sent=0，什么原因都不知道。
+    # 现在把每次跳过记下来，用户能在记录里看到「这条为什么没评」。
+    skipped: list[dict[str, str]] = []
+
+    def _skip(post_id: str, title: str, why: str) -> None:
+        skipped.append({"post_id": post_id, "title": str(title or "")[:40], "reason": why})
+        logger.info("回响：跳过评论（%s）：%s", why, str(title or post_id)[:40])
+
     for item in targets:
         # 先把帖子的标题 / 正文 / 配图内容凑齐，再交给模型写评论。
         # 【真机缺陷 2026-11-06】原来这里只传了一个 post_id，提示词里没有任何
         # 帖子内容，模型只能凭空编，导致「回复跟帖子一点关系都没有」。
         target = await create.enrich_comment_target(ctx, item)
         if not target.post_id:
+            _skip("", getattr(item, "title", ""), "拿不到帖子 id")
             continue
         if not (target.title or target.body or target.image_desc):
             # 一点素材都没有，宁可跳过也不发无关内容。
+            _skip(target.post_id, target.title, "帖子没有标题/正文/配图，没东西可接")
             continue
         text = await create.generate_comment(ctx, target, trace)
         if not str(text or "").strip():
+            # 【2026-11-09】模型返回空、或清洗后为空（表情把整句吃掉了），
+            # 以前只说「没生成」，现在说清是哪一种。
+            _skip(target.post_id, target.title, "模型没返回正文（或清洗后为空）")
             continue
         score = create.ai_flavor_score(text)
         verdict = await guard.is_commentable(ctx, text, score, mode, action="comment")
         if not verdict.ok:
+            _skip(target.post_id, target.title, f"护栏拦截：{verdict.message}")
             continue
         await publish.publish_comment(ctx, target, text, dry_run=(mode is RunMode.DRY_RUN))
         if mode is not RunMode.DRY_RUN:
             await guard.reserve_quota(ctx, mode, "comment")
         sent += 1
-    return {"comments_sent": sent}
+    return {"comments_sent": sent, "skipped": skipped}
 
 
 async def respond_and_interact(ctx: Any, mode: RunMode = RunMode.DRY_RUN) -> dict:

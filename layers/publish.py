@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import base64
 import logging
+import re
 from pathlib import Path
 from typing import Any
 
@@ -152,7 +153,7 @@ async def check_post_permission(ctx: Any) -> tuple[bool, str]:
     return True, ""
 
 
-def _safe_title(title: str) -> str:
+def _safe_title(title: str, body: str = "") -> str:
     """把标题裁到小黑盒允许的长度。
 
     【真机实测 2026-11-07】`link_tag=27`（图文帖）标题上限 **30 字**，
@@ -161,7 +162,40 @@ def _safe_title(title: str) -> str:
     模型输出带额外前缀）超长时都裁掉，避免因为一个标题白生成一整篇。
     """
     t = str(title or "").strip().replace("\n", " ")
-    return t[:30]
+    t = re.sub(r"^\s*(标题|题目|title)\s*[:：]\s*", "", t, flags=re.I).strip(" \"'“”「」『』《》")
+    # 表情标记不能进标题：`[cube_doge]` 是评论里的表情语法，标题栏不认，
+    # 还会被算进长度（真机报「标题必须为 1–80 字」就是这么来的）。
+    t = re.sub(r"\[[^\[\]]{1,24}\]", "", t).strip()
+
+    # 【真机缺陷 2026-11-09】模型把标题写成纯表情、或第一行只有 `[cube_xxx]`，
+    # 清洗后变空串，接口直接报「帖子标题必须为 1–80 字」，整条帖子白生成。
+    # 空标题就从正文首句兜一个，绝不留空、也绝不因为标题把整篇丢掉。
+    if not t.strip(" 　.,，。:：;；!?！？~～-—"):
+        body_head = str(body or "").strip().splitlines()[0] if str(body or "").strip() else ""
+        body_head = re.sub(r"\[[^\[\]]{1,24}\]", "", body_head).strip(" 　.,，。:：;；!！？?")
+        t = body_head or t
+    return _truncate_title(t)
+
+
+# 真机实测（2026-11-09）：接口说「标题最多输入30字」，但实际按 **UTF-8 字节** 算——
+# 10 个汉字（30 字节）刚好通过，11 个汉字就被拒。所以这里按字节截，不是按字符截。
+TITLE_MAX_BYTES = 30
+
+
+def _truncate_title(text: str, max_bytes: int = TITLE_MAX_BYTES) -> str:
+    """按 UTF-8 字节数截断标题，且不把字词截成半个emoji。"""
+    t = str(text or "").strip()
+    if len(t.encode("utf-8")) <= max_bytes:
+        return t
+    out: list[str] = []
+    used = 0
+    for ch in t:
+        n = len(ch.encode("utf-8"))
+        if used + n > max_bytes:
+            break
+        out.append(ch)
+        used += n
+    return "".join(out).rstrip(" 　.,，。:：;；!?！？~～-—")
 
 
 async def delete_post(ctx: Any, post_id: str) -> tuple[bool, str]:
@@ -219,20 +253,24 @@ async def publish_post(ctx: Any, draft: PostDraft, dry_run: bool = False) -> Pub
     tags = list(draft.hashtags or [])
     try:
         post_id = await client.publish_post(
-            title=_safe_title(draft.title),
+            title=_safe_title(draft.title, draft.text),
             segments=segments,
             link_tag=link_tag.value,
             topic_ids_str=topic_ids_str,
             hashtags=tags,
         )
     except Exception as exc:  # noqa: BLE001 —— 把上游黑话翻成人话，再原样抛给上层。
-        # 【2026-11-08】话题是锦上添花：格式不被接受时不能连累整条帖子发不出去。
-        # 带话题失败 → 去掉话题再试一次；还失败才如实抛错。
+        # 【真机缺陷 2026-11-09】有的分区报「只能单独选择 XX 分区」——
+        # 这类分区不能和别的混挂。这里把分区名翻成 id 记下来，下次挑分区自动规避。
+        _learn_exclusive_from_error(ctx, str(exc), draft)
+
+        # 带话题失败不一定是话题的问题（也可能是分区/限流），
+        # 但去掉话题重试成本很低，值得再试一次。
         if tags:
             logger.warning("回响：带话题发帖失败，去掉话题重试：%s", str(exc)[:120])
             try:
                 post_id = await client.publish_post(
-                    title=_safe_title(draft.title),
+                    title=_safe_title(draft.title, draft.text),
                     segments=segments,
                     link_tag=link_tag.value,
                     topic_ids_str=topic_ids_str,
@@ -256,6 +294,33 @@ async def publish_post(ctx: Any, draft: PostDraft, dry_run: bool = False) -> Pub
 # 服务端报错 → 能行动的中文提示。
 # 【为什么需要】上游用「错误的动态分区」搪塞无发帖权限的账号（真机实测），
 # 照着这句话去改分区只会越改越错。这里按已知语义翻译。
+def _learn_exclusive_from_error(ctx: Any, message: str, draft: Any) -> None:
+    """从「只能单独选择 X 分区」的报错里学出独占分区，下次自动规避。
+
+    平台只给名字不给 id，所以拿本地分区缓存把名字对回 id。
+    学到的结果会落盘，重启后不用再踩一遍。
+    """
+    if "只能单独选择" not in message:
+        return
+    try:
+        from layers import topics as _topics
+    except Exception:  # noqa: BLE001
+        return
+    cache = getattr(getattr(ctx, "store", None), "partition", None)
+    parts = cache.get() if cache is not None else []
+    for p in parts or []:
+        name = str(getattr(p, "name", "") or "").strip()
+        if name and name in message:  # 报错形如「只能单独选择 盒友杂谈 分区」
+            _topics.remember_exclusive(getattr(p, "id", 0), ctx)
+            logger.info("回响：记下独占分区「%s」，以后不跟其他分区混挂", name)
+            return
+    part = getattr(draft, "partition", None)
+    if part is not None:
+        _topics.remember_exclusive(getattr(part, "id", 0), ctx)
+
+
+
+
 _PUBLISH_ERROR_HINTS: tuple[tuple[str, str], ...] = (
     ("错误的动态分区",
      "发帖被拒：小黑盒报「错误的动态分区」。真机实测这条链路只接受图文帖"
@@ -295,7 +360,7 @@ async def publish_article(ctx: Any, draft: PostDraft, dry_run: bool = False) -> 
         )
     client = _client(ctx)
     post_id = await client.publish_article(
-        title=_safe_title(draft.title),
+        title=_safe_title(draft.title, draft.text),
         html=draft.text,
         topic_ids_str=topic_ids_str,
     )

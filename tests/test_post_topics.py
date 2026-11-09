@@ -34,12 +34,25 @@ class PickTopicIdsTest(unittest.TestCase):
         self.assertEqual(ids[0], 5483)
 
     def test_match_names_in_text(self) -> None:
+        # 正文提到的分区优先于「同组补齐」，但总数不超过平台硬限制 2 个。
+        # 名额只有 2 个：主分区先占一位，剩下一位给「名字最长的那次命中」
+        # （数码硬件 4 字 > 原神 2 字，长名更具体，能少误命中）。
         ids = topics.pick_topic_ids(
             partitions=PARTS, partition=PARTS[0], text="今天原神抽卡歪了，顺便聊聊数码硬件"
         )
-        self.assertIn(806933, ids)  # 分区本身
-        self.assertIn(5483, ids)    # 正文提到原神
-        self.assertIn(18745, ids)   # 正文提到数码硬件
+        self.assertEqual(ids[0], 806933, "主分区必须挂在第一位")
+        self.assertEqual(len(ids), topics.MAX_TOPICS_HARD_LIMIT)
+        self.assertIn(18745, ids, "正文里提到的分区应该占剩下那一位")
+
+    def test_body_match_beats_group_fill(self) -> None:
+        # 正文明确提到的分区，优先级高于同组按热度补齐。
+        parts = [
+            Partition(id=1, name="AI", group="G", heat=90),
+            Partition(id=2, name="原神", group="别的组", heat=1),
+            Partition(id=3, name="同组热门", group="G", heat=999),
+        ]
+        ids = topics.pick_topic_ids(partitions=parts, partition=parts[0], text="聊两句原神")
+        self.assertEqual(ids, [1, 2], "正文命中应该挤掉同组补齐")
 
     def test_custom_topics_first(self) -> None:
         ids = topics.pick_topic_ids(
@@ -118,14 +131,22 @@ class SameGroupFillTest(unittest.TestCase):
             Partition(id=3, name="校园生活", group="盒友之家", heat=3),
             Partition(id=4, name="英雄联盟", group="网游竞技", heat=999),
         ]
+        # 同组补齐也不许超过 2 个（小黑盒「请选择2个以内的分区」）。
         ids = topics.pick_topic_ids(partitions=parts, partition=parts[0], text="", max_topics=3)
-        self.assertEqual(ids, [1, 2, 3], "只补同组，且不跨组拿高热度")
+        self.assertEqual(ids, [1, 2], "只补同组，且不跨组拿高热度")
         self.assertNotIn(4, ids)
 
-    def test_respects_max_when_filling(self) -> None:
+    def test_never_exceeds_platform_limit(self) -> None:
+        """配置写成 5 也只能挂 2 个。
+
+        【2026-11-09 用户报障「发帖一直失败」】真机错误是
+        「请选择2个以内的分区」—— 多挂一个整条帖子就被拒，
+        所以配置只是上限声明，真正的天花板是平台。
+        """
         parts = [Partition(id=i, name=f"社区{i}", group="G", heat=10 - i) for i in range(1, 9)]
-        ids = topics.pick_topic_ids(partitions=parts, partition=parts[0], text="", max_topics=3)
-        self.assertEqual(len(ids), 3)
+        for want in (3, 5, 99):
+            ids = topics.pick_topic_ids(partitions=parts, partition=parts[0], text="", max_topics=want)
+            self.assertEqual(len(ids), topics.MAX_TOPICS_HARD_LIMIT, f"max_topics={want} 时超限")
 
     def test_can_disable_group_fill(self) -> None:
         parts = [

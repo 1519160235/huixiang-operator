@@ -289,7 +289,11 @@ class PublishConfig(PluginConfigBase):
         "小黑盒提示「错误勾选会被处理」，所以只挂同类的，不按热度乱凑",
         True,
     )
-    max_topics: int = N("最多挂几个分区", "发帖时勾选的社区（小黑盒字段叫 topic_ids）；真实帖子常见 1~2 个", 5)
+    max_topics: int = N(
+        "最多挂几个分区",
+        "小黑盒接口硬限制：最多 2 个，多一个整条帖子会被拒。填再大也会自动压到 2",
+        2,
+    )
     community_allowlist: list[str] = Field(
         default_factory=list,
         description="固定要挂的分区名（可选）。留空则按「默认分区 + 正文匹配」挑。",

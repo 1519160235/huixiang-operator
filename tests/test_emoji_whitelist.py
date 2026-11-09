@@ -55,8 +55,22 @@ class EmojiWhitelistTest(unittest.TestCase):
         self.assertEqual(emoji_mod.sanitize_marks("离谱（cube_滑稽）"), "离谱[cube_滑稽]")
 
     def test_broken_mark_removed(self) -> None:
+        # 白名单外 / 只有半个括号：当残渣删干净，不留 `[cube_` 之类。
         self.assertEqual(emoji_mod.sanitize_marks("残渣[cube_喜"), "残渣")
-        self.assertEqual(emoji_mod.sanitize_marks("裸奔 cube_doge 结束").strip(), "裸奔结束")
+        self.assertEqual(emoji_mod.sanitize_marks("裸奔 cube_不存在的 结束").strip(), "裸奔结束")
+
+    def test_bare_mark_repaired(self) -> None:
+        """缺括号但名字在白名单里：补括号保住表情，别把半句话一起吃掉。
+
+        【2026-11-09 用户报障「有几个评论还是带了 cube 标语」】
+        原来这里一律按残渣删，模型写 `累cube_无语` 时评论只剩半句；
+        极端情况整条变空，用户看到的就是「正文没生成」。
+        """
+        self.assertEqual(
+            emoji_mod.sanitize_marks("裸奔 cube_doge 结束").strip(), "裸奔 [cube_doge] 结束"
+        )
+        # 句尾是最容易踩「空串是任何串子串」的位置，单独盯一下。
+        self.assertEqual(emoji_mod.sanitize_marks("今天真累cube_doge"), "今天真累[cube_doge]")
 
     def test_plain_text_untouched(self) -> None:
         text = "这波操作真可以，我也想要一个"

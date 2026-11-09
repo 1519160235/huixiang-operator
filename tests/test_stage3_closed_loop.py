@@ -372,9 +372,15 @@ class TestGuessGameName(unittest.TestCase):
     def test_no_signal_returns_empty(self) -> None:
         self.assertEqual(create._guess_game_name([], "", "", ""), "")
 
-    def test_safe_title_truncates_to_30(self) -> None:
-        # 真机实测：图文帖（27）标题上限 30 字，超一个字整条失败。
-        self.assertEqual(len(publish._safe_title("测" * 50)), 30)
+    def test_safe_title_truncates_to_30_bytes(self) -> None:
+        """标题上限是 30 **字节**（真机 2026-11-09 复测）。
+
+        中文字符 3 字节，所以 10 个汉字刚好 30 字节通过、11 个就报
+        「标题最多输入30字」。按字符截会漏，必须按字节截。
+        """
+        out = publish._safe_title("测" * 50)
+        self.assertLessEqual(len(out.encode("utf-8")), publish.TITLE_MAX_BYTES)
+        self.assertEqual(out, "测" * 10)  # 30 字节上限 = 10 个汉字
         self.assertEqual(publish._safe_title("短标题"), "短标题")
         self.assertEqual(publish._safe_title("带\n换行"), "带 换行")
 
