@@ -1,0 +1,452 @@
+{
+  "version": 1,
+  "updated": "2026-11-10",
+  "note": "系列常识种子库。只写有把握的事实；年份不确定就留空，宁可不说也别编。works[].relation 用「初代 / 续作 / 外传 / 重制 / 加强版」这类词。",
+  "series": [
+    {
+      "id": "hollow-knight",
+      "name": "空洞骑士",
+      "notes": "丝之歌最初规划为《空洞骑士》的 DLC，后来内容体量远超预期，升级为独立续作；它有自己的本体，不需要装前作就能玩。",
+      "works": [
+        {
+          "name": "空洞骑士",
+          "aliases": ["Hollow Knight", "空骑"],
+          "relation": "初代",
+          "year": "2017",
+          "note": "2017 年发售，主角是小骑士，舞台是圣巢。"
+        },
+        {
+          "name": "空洞骑士：丝之歌",
+          "aliases": ["丝之歌", "Silksong", "Hollow Knight: Silksong"],
+          "relation": "续作（独立游戏，不是 DLC）",
+          "year": "2025",
+          "note": "2025 年 9 月 4 日发售，主角是大黄蜂，舞台是法洛姆（Pharloom）。它本身就是一款完整游戏，说「本体」时指的就是它。后续还有免费扩展《悲海》（Sea of Sorrow）。"
+        }
+      ]
+    },
+    {
+      "id": "elden-ring",
+      "name": "艾尔登法环",
+      "notes": "《黑夜君临》是同世界观的独立衍生作，不是《艾尔登法环》的 DLC。",
+      "works": [
+        {
+          "name": "艾尔登法环",
+          "aliases": ["Elden Ring", "老头环"],
+          "relation": "初代",
+          "year": "2022",
+          "note": "2022 年发售；大型 DLC 是《黄金树幽影》（Shadow of the Erdtree），2024 年推出。"
+        },
+        {
+          "name": "艾尔登法环：黑夜君临",
+          "aliases": ["黑夜君临", "Nightreign"],
+          "relation": "同世界观衍生作",
+          "year": "2025"
+        }
+      ]
+    },
+    {
+      "id": "black-myth",
+      "name": "黑神话",
+      "works": [
+        {
+          "name": "黑神话：悟空",
+          "aliases": ["黑神话悟空", "Black Myth: Wukong", "黑猴"],
+          "relation": "初代",
+          "year": "2024",
+          "note": "2024 年发售，游戏科学开发。续作尚未发售，不要替它安排档期。"
+        }
+      ]
+    },
+    {
+      "id": "zelda-botw",
+      "name": "塞尔达传说",
+      "works": [
+        {
+          "name": "塞尔达传说：旷野之息",
+          "aliases": ["旷野之息", "Breath of the Wild", "BotW", "野炊"],
+          "relation": "初代（该分支）",
+          "year": "2017"
+        },
+        {
+          "name": "塞尔达传说：王国之泪",
+          "aliases": ["王国之泪", "Tears of the Kingdom", "TotK"],
+          "relation": "续作",
+          "year": "2023",
+          "note": "《旷野之息》的直接续作，地图沿用但玩法大改。"
+        }
+      ]
+    },
+    {
+      "id": "cyberpunk",
+      "name": "赛博朋克",
+      "works": [
+        {
+          "name": "赛博朋克 2077",
+          "aliases": ["赛博朋克2077", "Cyberpunk 2077", "2077"],
+          "relation": "初代",
+          "year": "2020",
+          "note": "唯一的大型资料片是《往日之影》（Phantom Liberty），2023 年推出。"
+        }
+      ]
+    },
+    {
+      "id": "witcher",
+      "name": "巫师",
+      "works": [
+        {
+          "name": "巫师 3：狂猎",
+          "aliases": ["巫师3", "The Witcher 3", "狂猎"],
+          "relation": "系列第三作",
+          "year": "2015",
+          "note": "两个大型资料片是《石之心》和《血与酒》。"
+        }
+      ]
+    },
+    {
+      "id": "gta",
+      "name": "侠盗猎车手",
+      "works": [
+        {
+          "name": "侠盗猎车手 5",
+          "aliases": ["GTA5", "GTA V", "给他爱5"],
+          "relation": "系列第五作",
+          "year": "2013"
+        },
+        {
+          "name": "侠盗猎车手 6",
+          "aliases": ["GTA6", "GTA VI", "给他爱6"],
+          "relation": "续作",
+          "year": "",
+          "note": "发售日以官方公告为准，不要替它编日期。"
+        }
+      ]
+    },
+    {
+      "id": "rdr",
+      "name": "荒野大镖客",
+      "works": [
+        {
+          "name": "荒野大镖客：救赎 2",
+          "aliases": ["荒野大镖客2", "大表哥2", "Red Dead Redemption 2", "RDR2"],
+          "relation": "前传（剧情在初代之前）",
+          "year": "2018",
+          "note": "剧情上是《荒野大镖客：救赎》的前传，不是续作。"
+        }
+      ]
+    },
+    {
+      "id": "monster-hunter",
+      "name": "怪物猎人",
+      "works": [
+        {
+          "name": "怪物猎人：世界",
+          "aliases": ["怪猎世界", "Monster Hunter: World", "MHW"],
+          "relation": "系列作",
+          "year": "2018",
+          "note": "大型扩展是《冰原》（Iceborne）。"
+        },
+        {
+          "name": "怪物猎人：荒野",
+          "aliases": ["怪猎荒野", "Monster Hunter Wilds", "MHWilds"],
+          "relation": "系列新作",
+          "year": "2025"
+        }
+      ]
+    },
+    {
+      "id": "fromsoftware-souls",
+      "name": "魂系（FromSoftware）",
+      "notes": "《只狼》《血源诅咒》都是独立作品，不是《黑暗之魂》的续作；它们共享「魂系」玩法标签，但世界观不相通。",
+      "works": [
+        {
+          "name": "黑暗之魂 3",
+          "aliases": ["黑魂3", "Dark Souls III", "DS3"],
+          "relation": "系列第三作",
+          "year": "2016",
+          "note": "资料片是《艾雷德尔之烬》和《环印城》。"
+        },
+        {
+          "name": "只狼：影逝二度",
+          "aliases": ["只狼", "Sekiro"],
+          "relation": "独立作品",
+          "year": "2019",
+          "note": "不是黑魂续作，也没有官方续作。"
+        },
+        {
+          "name": "血源诅咒",
+          "aliases": ["血源", "Bloodborne"],
+          "relation": "独立作品",
+          "year": "2015",
+          "note": "独立世界观，资料片是《老猎人》。"
+        }
+      ]
+    },
+    {
+      "id": "genshin",
+      "name": "原神",
+      "works": [
+        {
+          "name": "原神",
+          "aliases": ["Genshin Impact"],
+          "relation": "独立作品",
+          "year": "2020",
+          "note": "持续版本更新的长线运营游戏，没有「续作」；不要把它和《崩坏》系列混为一谈。"
+        }
+      ]
+    },
+    {
+      "id": "honkai",
+      "name": "崩坏",
+      "notes": "《崩坏3》和《崩坏：星穹铁道》是同厂同世界观下的不同作品，不是彼此的续作。",
+      "works": [
+        {
+          "name": "崩坏：星穹铁道",
+          "aliases": ["星穹铁道", "星铁", "Honkai: Star Rail"],
+          "relation": "同世界观独立作品",
+          "year": "2023"
+        },
+        {
+          "name": "崩坏 3",
+          "aliases": ["崩坏3", "Honkai Impact 3rd"],
+          "relation": "同世界观独立作品",
+          "year": "2016"
+        }
+      ]
+    },
+    {
+      "id": "persona",
+      "name": "女神异闻录",
+      "works": [
+        {
+          "name": "女神异闻录 5",
+          "aliases": ["P5", "Persona 5"],
+          "relation": "系列第五作",
+          "year": "2016",
+          "note": "加强版是《女神异闻录 5 皇家版》（P5R），属于同一部的强化版本，不是续作。"
+        }
+      ]
+    },
+    {
+      "id": "ff7-remake",
+      "name": "最终幻想 7 重制",
+      "works": [
+        {
+          "name": "最终幻想 7 重制版",
+          "aliases": ["FF7RE", "FF7 Remake", "最终幻想7重制"],
+          "relation": "重制第一部",
+          "year": "2020",
+          "note": "分章节重制：《重制版》之后是《重生》（Rebirth），不是「DLC」。"
+        },
+        {
+          "name": "最终幻想 7 重生",
+          "aliases": ["FF7 Rebirth", "最终幻想7重生"],
+          "relation": "重制第二部",
+          "year": "2024"
+        }
+      ]
+    },
+    {
+      "id": "gow",
+      "name": "战神",
+      "works": [
+        {
+          "name": "战神",
+          "aliases": ["God of War", "战神4", "战神2018"],
+          "relation": "北欧篇第一部",
+          "year": "2018"
+        },
+        {
+          "name": "战神：诸神黄昏",
+          "aliases": ["诸神黄昏", "God of War Ragnarök", "GOWR"],
+          "relation": "续作",
+          "year": "2022"
+        }
+      ]
+    },
+    {
+      "id": "tlou",
+      "name": "最后生还者",
+      "works": [
+        {
+          "name": "最后生还者",
+          "aliases": ["The Last of Us", "TLOU", "美末"],
+          "relation": "初代",
+          "year": "2013"
+        },
+        {
+          "name": "最后生还者 第二部",
+          "aliases": ["最后生还者2", "The Last of Us Part II", "美末2"],
+          "relation": "续作",
+          "year": "2020"
+        }
+      ]
+    },
+    {
+      "id": "death-stranding",
+      "name": "死亡搁浅",
+      "works": [
+        {
+          "name": "死亡搁浅",
+          "aliases": ["Death Stranding", "DS"],
+          "relation": "初代",
+          "year": "2019"
+        },
+        {
+          "name": "死亡搁浅 2",
+          "aliases": ["死亡搁浅2", "Death Stranding 2"],
+          "relation": "续作",
+          "year": "2025"
+        }
+      ]
+    },
+    {
+      "id": "lies-of-p",
+      "name": "匹诺曹的谎言",
+      "works": [
+        {
+          "name": "匹诺曹的谎言",
+          "aliases": ["Lies of P"],
+          "relation": "独立作品",
+          "year": "2023",
+          "note": "DLC 是《序曲》（Overture）。"
+        }
+      ]
+    },
+    {
+      "id": "stellar-blade",
+      "name": "剑星",
+      "works": [
+        {
+          "name": "剑星",
+          "aliases": ["Stellar Blade", "星刃"],
+          "relation": "独立作品",
+          "year": "2024"
+        }
+      ]
+    },
+    {
+      "id": "wuchang",
+      "name": "明末",
+      "works": [
+        {
+          "name": "明末：渊虚之羽",
+          "aliases": ["明末渊虚之羽", "Wuchang: Fallen Feathers"],
+          "relation": "独立作品",
+          "year": "2025"
+        }
+      ]
+    },
+    {
+      "id": "phantom-blade",
+      "name": "影之刃",
+      "works": [
+        {
+          "name": "影之刃零",
+          "aliases": ["Phantom Blade Zero"],
+          "relation": "系列新作",
+          "year": "",
+          "note": "发售日以官方公告为准，不要替它编日期。"
+        }
+      ]
+    },
+    {
+      "id": "delta-force",
+      "name": "三角洲行动",
+      "works": [
+        {
+          "name": "三角洲行动",
+          "aliases": ["Delta Force", "三角洲"],
+          "relation": "系列重启作",
+          "year": "2024",
+          "note": "长线运营的射击游戏，没有「本体没出」这回事。"
+        }
+      ]
+    },
+    {
+      "id": "minecraft",
+      "name": "我的世界",
+      "works": [
+        {
+          "name": "我的世界",
+          "aliases": ["Minecraft", "MC"],
+          "relation": "独立作品",
+          "year": "2011",
+          "note": "持续更新，没有续作。"
+        }
+      ]
+    },
+    {
+      "id": "terraria",
+      "name": "泰拉瑞亚",
+      "works": [
+        {
+          "name": "泰拉瑞亚",
+          "aliases": ["Terraria"],
+          "relation": "独立作品",
+          "year": "2011"
+        }
+      ]
+    },
+    {
+      "id": "stardew",
+      "name": "星露谷物语",
+      "works": [
+        {
+          "name": "星露谷物语",
+          "aliases": ["Stardew Valley", "星露谷"],
+          "relation": "独立作品",
+          "year": "2016"
+        }
+      ]
+    },
+    {
+      "id": "dyson-sphere",
+      "name": "戴森球计划",
+      "works": [
+        {
+          "name": "戴森球计划",
+          "aliases": ["Dyson Sphere Program"],
+          "relation": "独立作品",
+          "year": "2021"
+        }
+      ]
+    },
+    {
+      "id": "tale-of-immortal",
+      "name": "太吾绘卷",
+      "works": [
+        {
+          "name": "太吾绘卷",
+          "aliases": ["The Scroll of Taiwu"],
+          "relation": "独立作品",
+          "year": "2018"
+        }
+      ]
+    },
+    {
+      "id": "baldurs-gate",
+      "name": "博德之门",
+      "works": [
+        {
+          "name": "博德之门 3",
+          "aliases": ["博德之门3", "Baldur's Gate 3", "BG3"],
+          "relation": "系列第三作",
+          "year": "2023"
+        }
+      ]
+    },
+    {
+      "id": "resident-evil",
+      "name": "生化危机",
+      "works": [
+        {
+          "name": "生化危机 4 重制版",
+          "aliases": ["生化4重制", "Resident Evil 4 Remake", "RE4"],
+          "relation": "重制作品",
+          "year": "2023",
+          "note": "是 2005 年《生化危机 4》的重制，不是新作也不是 DLC。"
+        }
+      ]
+    }
+  ]
+}

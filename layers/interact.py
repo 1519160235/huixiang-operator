@@ -149,6 +149,7 @@ async def respond_to_notifications(ctx: Any, mode: RunMode = RunMode.DRY_RUN) ->
     #   2. 本轮已经说过的句子，生成时明确告诉模型「这些说过了，换个说法」。
     replied_keys: set[tuple[str, str, str]] = set()
     said_this_round: list[str] = []
+    sent_items: list[dict[str, str]] = []
     for notif in notifs:
         nid = str(getattr(notif, "notification_id", "") or getattr(notif, "external_event_id", "") or "")
         if not nid:
@@ -191,7 +192,14 @@ async def respond_to_notifications(ctx: Any, mode: RunMode = RunMode.DRY_RUN) ->
         if mode is not RunMode.DRY_RUN:
             await guard.reserve_quota(ctx, mode, "reply")
         handled += 1
-    return {"ok": True, "handled": handled}
+        sent_items.append(
+            {
+                "post_id": str(getattr(notif, "post_id", "") or ""),
+                "text": str(text)[:200],
+                "kind": "reply",
+            }
+        )
+    return {"ok": True, "handled": handled, "sent_items": sent_items}
 
 
 async def interact_with_feeds(ctx: Any, mode: RunMode = RunMode.DRY_RUN) -> dict:
@@ -217,6 +225,7 @@ async def interact_with_feeds(ctx: Any, mode: RunMode = RunMode.DRY_RUN) -> dict
     # 原来每条跳过都只是 `continue`，上层只看到 comments_sent=0，什么原因都不知道。
     # 现在把每次跳过记下来，用户能在记录里看到「这条为什么没评」。
     skipped: list[dict[str, str]] = []
+    sent_items: list[dict[str, str]] = []
 
     def _skip(post_id: str, title: str, why: str) -> None:
         skipped.append({"post_id": post_id, "title": str(title or "")[:40], "reason": why})
@@ -249,7 +258,16 @@ async def interact_with_feeds(ctx: Any, mode: RunMode = RunMode.DRY_RUN) -> dict
         if mode is not RunMode.DRY_RUN:
             await guard.reserve_quota(ctx, mode, "comment")
         sent += 1
-    return {"comments_sent": sent, "skipped": skipped}
+        # 【2026-11-10】评论发出去要留全文：这次「本体」翻车是靠事后扒接口才还原的，
+        # 记录里只有 comments_sent=1，连评了哪条、说了什么都不知道。
+        sent_items.append(
+            {
+                "post_id": target.post_id,
+                "title": str(target.title or "")[:40],
+                "text": str(text)[:200],
+            }
+        )
+    return {"comments_sent": sent, "skipped": skipped, "sent_items": sent_items}
 
 
 async def respond_and_interact(ctx: Any, mode: RunMode = RunMode.DRY_RUN) -> dict:
@@ -260,6 +278,9 @@ async def respond_and_interact(ctx: Any, mode: RunMode = RunMode.DRY_RUN) -> dic
         "ok": True,
         "notifications_handled": notification_result.get("handled", 0),
         "comments_sent": browse_result.get("comments_sent", 0),
+        "skipped": browse_result.get("skipped") or [],
+        "sent_items": (notification_result.get("sent_items") or [])
+        + (browse_result.get("sent_items") or []),
     }
 
 

@@ -37,6 +37,7 @@ from models import (
     Topic,
 )
 from layers._cfg import read as _read, read_bool as _read_bool, read_str as _read_str, section as _section
+from layers import series
 from layers.emojis import EMOJI_HINT, sanitize_marks as _sanitize_marks
 from layers.voices import (
     format_brief as _format_brief,
@@ -1388,6 +1389,19 @@ async def generate_comment(
         parts.append(
             "这个圈子里这些词是这个意思（用得着就自然带进去，别硬塞）：\n" + jargon[:600]
         )
+
+    # 【真机缺陷 2026-11-10】不告诉它这是哪个系列，它就会把「本体」当成前作，
+    # 说出「先把本体端上来」这种在玩家看来等于「游戏还没发」的蠢话。
+    # 认到系列就把常识塞进去；认不到就明确禁止它用相对说法。
+    series_hint = series.build_hint(ctx, title, body, image_desc, title)
+    if series_hint:
+        parts.append(series_hint)
+    else:
+        parts.append(
+            "**这个游戏你只知道它的名字，不清楚它有没有前作 / 续作 / DLC。**\n"
+            "所以绝对不要用「本体」「本传」「前作」「续作」「初代」这类说法，"
+            "也不要猜它出没出、什么时候出。就事论事说这条帖子的内容。"
+        )
     if author and for_reply:
         parts.append(f"发帖人昵称：{author}")
 
@@ -1441,7 +1455,10 @@ async def generate_comment(
     raw = strip_reasoning_prefix(str(raw))
     text = polish_chinese(raw)
     # 强清洗：转简体 + 剥英文残留 + 去重复（2026-11-07 评论质量问题兜底）。
-    return sanitize_comment(text)
+    text = sanitize_comment(text)
+    # 【2026-11-10】提示词说了不许用，模型仍可能写。认不到系列时把含
+    # 「本体 / 前作 / 续作」的分句切掉，切完太短就返回空串让上层跳过。
+    return series.guard_relations(text, known=bool(series_hint))
 
 
 def _data_dir(ctx: Any) -> Path:

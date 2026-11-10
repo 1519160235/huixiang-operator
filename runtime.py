@@ -55,6 +55,17 @@ DEFAULT_MODEL_NAME = "feiyu-gemini-flash"
 
 # 降级时按顺序尝试的「同厂/同类」候选前缀。
 # 用户偏好是 Gemini（GM），所以先找 gemini 系；找不到再退到 glm；最后交给任务默认。
+# 【真机缺陷 2026-11-10】宿主 `llm.get_available_models()` 返回的其实是**任务名**
+# （embedding / emoji / fast_model …），不是模型名。拿它去比对配置里的模型名，
+# 必然得出「模型不可用」，然后白白降级。这里把纯任务名的列表识别出来，
+# 当成「问了但没得到模型清单」处理。
+_TASK_NAME_ONLY = {
+    "embedding", "emoji", "fast_model", "image_embedding", "learner", "memory",
+    "replyer", "planner", "utils", "vlm", "voice", "tts", "asr", "web_search",
+    "tool", "image", "reasoning", "router", "judge",
+}
+
+
 MODEL_PREFERENCE_PREFIXES: tuple[str, ...] = ("gemini", "glm", "claude", "gpt")
 
 # 单次生成给宿主留多久（毫秒）。
@@ -247,6 +258,10 @@ class Runtime:
 
         # 拿不到列表：说明不了问题，维持原样（老宿主可能不支持这个能力）。
         if not models:
+            return name
+
+        # 宿主给的是任务名清单（不是模型名）：同样说明不了问题，别瞎降级。
+        if all(m.lower() in _TASK_NAME_ONLY for m in models):
             return name
 
         if name and name in models:

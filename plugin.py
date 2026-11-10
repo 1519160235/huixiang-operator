@@ -690,7 +690,11 @@ class HuiXiangPlugin(MaiBotPlugin):
     async def run_interact_once(self, ctx: Any, mode: RunMode = RunMode.DRY_RUN) -> dict:
         """互动一轮：响应通知 + 主动浏览互动评论。"""
         self._ensure_store(ctx)
-        return await interact.respond_and_interact(ctx, mode)
+        result = await interact.respond_and_interact(ctx, mode)
+        # 有内容才落记录，免得每轮都写一条空的；评论全文也带上，方便事后复盘。
+        if result.get("comments_sent") or result.get("notifications_handled") or result.get("skipped"):
+            self._log(ctx, "interact", True, "", result)
+        return result
 
     async def run_summary_once(self, ctx: Any, mode: RunMode = RunMode.DRY_RUN, force: bool = False) -> dict:
         """发一条帖子：判定想不想发 → 生成 → 校验形状 → 护栏 → 发帖 → 回读。
