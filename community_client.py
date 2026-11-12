@@ -240,10 +240,12 @@ class CommunityClient(XiaoheiheApiClient):
         if self._client is None:
             raise RuntimeError("小黑盒客户端未初始化")
         await self._limiter.wait()
+        cookies = getattr(self.credentials, "cookies", {}) or {}
+        heybox_id = str(cookies.get("heybox_id") or cookies.get("user_heybox_id") or "")
         try:
             response = await self._client.post(
                 "https://api.xiaoheihe.cn" + path,
-                params=comment_query(path=path),
+                params=comment_query(path=path, heybox_id=heybox_id),
                 data=form_body,
                 headers={
                     "Origin": "https://www.xiaoheihe.cn",

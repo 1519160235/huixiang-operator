@@ -140,14 +140,16 @@ class TestWriteSigning(unittest.TestCase):
         self.assertEqual(result["hkey"], expected, "写签名 hkey 必须用 stamp+1 计算")
         self.assertEqual(result["_time"], "1700000000", "_time 必须保留原始时间，不能用 stamp+1")
         self.assertIn("_rnd", result)
-        self.assertTrue(result["_rnd"].startswith("15:"))
+        self.assertTrue(result["_rnd"].startswith("16:"), "线上前端已切到 _rnd v16")
 
     def test_comment_query_deterministic(self) -> None:
         import comment_signing
 
-        a = comment_signing.comment_query(now=1700000000, nonce="FIXEDNONCE")
-        b = comment_signing.comment_query(now=1700000000, nonce="FIXEDNONCE")
-        self.assertEqual(a, b, "相同 now/nonce 必须得到相同写签名")
+        # v16 的 _rnd 含随机 IV；固定 IV 后同样必须是确定性的。
+        fixed_iv = b"\x00" * 12
+        a = comment_signing.comment_query(now=1700000000, nonce="FIXEDNONCE", iv=fixed_iv)
+        b = comment_signing.comment_query(now=1700000000, nonce="FIXEDNONCE", iv=fixed_iv)
+        self.assertEqual(a, b, "相同 now/nonce/iv 必须得到相同写签名")
 
     def test_read_write_signing_differ(self) -> None:
         import comment_signing

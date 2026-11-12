@@ -42,6 +42,10 @@ PLATFORM_BLOCK_MARKERS: tuple[str, ...] = (
     "账号被限制",
     "已被禁言",
     "没有发帖权限",
+    # 2026-11-12 v16 协议下平台的新话术：验签通过后，账号级写功能被限制。
+    "你的账号无法使用该功能",
+    "无法使用该功能",
+    "账号无法使用",
 )
 
 # 限流单独走短冷却：等一会儿就好，不该按「平台坏了」退避几小时。
@@ -131,7 +135,9 @@ def record_rejection(ctx: Any, message: str, now: float | None = None) -> dict[s
         reason = "小黑盒限流"
     else:
         seconds = min(BASE_COOLDOWN_SEC * (2 ** (n - 1)), MAX_COOLDOWN_SEC)
-        reason = "小黑盒：发布功能暂不可用"
+        # 保留平台原始话术：v16 协议下平台会换成「你的账号无法使用该功能」，
+        # 写死旧话术会让状态文件误导排查。
+        reason = "小黑盒：" + str(message or "")[:120]
     state = {
         "until": now + seconds,
         "consecutive": n,
