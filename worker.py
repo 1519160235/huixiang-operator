@@ -216,7 +216,9 @@ class OpsWorker:
         try:
             outcome = await runner(self.ctx, self.mode)
         except Exception as exc:  # noqa: BLE001 —— 子步骤失败只降级，不影响后续步骤。
-            self._log(name, False, f"执行异常：{type(exc).__name__}")
+            # 【真机缺陷 2026-11-12】以前只记类名（"执行异常：CommentRejectedError"），
+            # 排查时完全不知道平台到底说了什么，只能事后扒接口。把原始消息带上。
+            self._log(name, False, f"执行异常：{type(exc).__name__}: {str(exc)[:160]}")
             return {"ok": False, "code": "exception", "message": str(exc)[:200]}
         if not isinstance(outcome, dict):
             self._log(name, False, "返回值不是对象")

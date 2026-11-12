@@ -54,7 +54,7 @@ import contracts
 import state
 from config_model import HuiXiangConfig
 from models import RunMode, Topic
-from layers import LAYER_ORDER, inbound, sense, create, guard, publish, interact, summarize, links
+from layers import LAYER_ORDER, inbound, sense, create, guard, publish, interact, summarize, links, cooldown
 from layers._cfg import NO_PARTITION_CHOICE, norm_choice
 from runtime import Runtime
 from worker import OpsWorker
@@ -612,6 +612,11 @@ class HuiXiangPlugin(MaiBotPlugin):
         真实：过护栏后真正发帖，回读核验通过才占用额度并标记去重。
         """
         self._ensure_store(ctx)
+        # 【2026-11-12】平台拒绝发布时，在任何生成/生图之前先熔断，别再白扣 API 费用。
+        if mode is not RunMode.DRY_RUN:
+            can_post, why = await publish.check_post_permission(ctx)
+            if not can_post:
+                return {"ok": False, "code": "publish_cooldown", "message": why}
         trace = await sense.read_life_trace(ctx)
         if not await sense.can_speak_now(ctx, trace):
             self.ctx.logger.info("回响：当前不宜开口（睡眠或社交电量不足），本轮跳过。")
@@ -621,7 +626,11 @@ class HuiXiangPlugin(MaiBotPlugin):
         partition = await self._pick_partition(ctx)
         draft = await create.generate_post(ctx, topic, trace)
         draft.partition = partition
-        if self.cfg().image.with_image:
+        image_on = bool(self.cfg().image.with_image)
+        if image_on and cooldown.should_skip_image(ctx):
+            self.ctx.logger.info("回响：发布冷却刚结束，本轮用纯文字试探，暂不生图")
+            image_on = False
+        if image_on:
             draft.images = await create.generate_images(ctx, draft, self.cfg().image.image_count)
             if mode is not RunMode.DRY_RUN:
                 for asset in draft.images:

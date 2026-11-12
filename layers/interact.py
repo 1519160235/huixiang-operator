@@ -22,7 +22,7 @@ from typing import Any
 
 from models import CommentTarget, RunMode
 
-from . import create, guard, inbound, publish, sense
+from . import cooldown, create, guard, inbound, publish, sense
 logger = logging.getLogger(__name__)
 
 from ._cfg import read_bool as _read_bool, read_int as _read_int, read_list as _read_list, read_str as _read_str, section as _section
@@ -150,6 +150,7 @@ async def respond_to_notifications(ctx: Any, mode: RunMode = RunMode.DRY_RUN) ->
     replied_keys: set[tuple[str, str, str]] = set()
     said_this_round: list[str] = []
     sent_items: list[dict[str, str]] = []
+    skipped: list[dict[str, str]] = []
     for notif in notifs:
         nid = str(getattr(notif, "notification_id", "") or getattr(notif, "external_event_id", "") or "")
         if not nid:
@@ -186,7 +187,16 @@ async def respond_to_notifications(ctx: Any, mode: RunMode = RunMode.DRY_RUN) ->
         verdict = await guard.is_commentable(ctx, text, score, mode, action="reply")
         if not verdict.ok:
             continue
-        await publish.reply_notification(ctx, notif, text, dry_run=(mode is RunMode.DRY_RUN))
+        try:
+            await publish.reply_notification(ctx, notif, text, dry_run=(mode is RunMode.DRY_RUN))
+        except Exception as exc:  # noqa: BLE001 —— 一条发不出去不该拖垮整轮互动。
+            reason = str(exc)[:160] or type(exc).__name__
+            logger.warning("回响：回复通知发送失败：%s", reason)
+            skipped.append({"post_id": key[0], "reason": f"发送被拒：{reason}"})
+            if cooldown.classify(reason):
+                cooldown.record_rejection(ctx, reason)
+                break  # 平台层面发不了，剩下的通知别再白生成一遍。
+            continue
         if notification_store is not None:
             notification_store.mark(nid)
         if mode is not RunMode.DRY_RUN:
@@ -199,7 +209,7 @@ async def respond_to_notifications(ctx: Any, mode: RunMode = RunMode.DRY_RUN) ->
                 "kind": "reply",
             }
         )
-    return {"ok": True, "handled": handled, "sent_items": sent_items}
+    return {"ok": True, "handled": handled, "sent_items": sent_items, "skipped": skipped}
 
 
 async def interact_with_feeds(ctx: Any, mode: RunMode = RunMode.DRY_RUN) -> dict:
@@ -254,7 +264,17 @@ async def interact_with_feeds(ctx: Any, mode: RunMode = RunMode.DRY_RUN) -> dict
         if not verdict.ok:
             _skip(target.post_id, target.title, f"护栏拦截：{verdict.message}")
             continue
-        await publish.publish_comment(ctx, target, text, dry_run=(mode is RunMode.DRY_RUN))
+        try:
+            await publish.publish_comment(ctx, target, text, dry_run=(mode is RunMode.DRY_RUN))
+        except Exception as exc:  # noqa: BLE001 —— 记录原因并继续下一条，别让整轮 ok=False。
+            reason = str(exc)[:160] or type(exc).__name__
+            _skip(target.post_id, target.title, f"发送被拒：{reason}")
+            if cooldown.classify(reason):
+                # 【2026-11-12】评论和发帖被同一账号限制挡住时，共用冷却：
+                # 冷却期内连评论文本都不再生成，省 LLM 费用。
+                cooldown.record_rejection(ctx, reason)
+                break
+            continue
         if mode is not RunMode.DRY_RUN:
             await guard.reserve_quota(ctx, mode, "comment")
         sent += 1
@@ -272,13 +292,24 @@ async def interact_with_feeds(ctx: Any, mode: RunMode = RunMode.DRY_RUN) -> dict
 
 async def respond_and_interact(ctx: Any, mode: RunMode = RunMode.DRY_RUN) -> dict:
     """互动主入口：先响应通知，再主动浏览并互动评论。"""
+    # 【2026-11-12】平台把评论/发帖都回绝时，整轮直接跳过：
+    # 否则每 2 分钟生成一批注定发不出去的评论，白扣 LLM 费用、记录里还只有一句类名。
+    if mode is not RunMode.DRY_RUN:
+        blocked, why = cooldown.is_blocked(ctx)
+        if blocked:
+            return {
+                "ok": False, "code": "publish_cooldown", "message": why,
+                "notifications_handled": 0, "comments_sent": 0,
+                "skipped": [], "sent_items": [],
+            }
     notification_result = await respond_to_notifications(ctx, mode)
     browse_result = await interact_with_feeds(ctx, mode)
     return {
         "ok": True,
         "notifications_handled": notification_result.get("handled", 0),
         "comments_sent": browse_result.get("comments_sent", 0),
-        "skipped": browse_result.get("skipped") or [],
+        "skipped": (notification_result.get("skipped") or [])
+        + (browse_result.get("skipped") or []),
         "sent_items": (notification_result.get("sent_items") or [])
         + (browse_result.get("sent_items") or []),
     }

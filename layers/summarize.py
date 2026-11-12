@@ -27,7 +27,7 @@ from typing import Any
 
 from models import LinkTag, PostDraft, RunMode, SummaryDraft
 
-from . import create, guard, hashtags, publish, schedule, sense, topics, voices
+from . import cooldown, create, guard, hashtags, publish, schedule, sense, topics, voices
 from ._cfg import norm_choice as _norm_choice, read as _read_section_value, section as _section
 
 logger = logging.getLogger(__name__)
@@ -499,6 +499,11 @@ async def run_summary_once(
     # 现在按 [image].with_image 生图：真实模式上传图床，演练只生成不上传。
     # 生图/上传失败一律降级纯文字，绝不阻断发帖。
     image_on, image_count = _image_cfg(ctx)
+    # 【2026-11-12】冷却刚到期时先用纯文字试探，别急着花钱生图：
+    # 平台要是还没恢复，这一轮图又白发一张。发成功了 clear() 会自动恢复生图。
+    if image_on and cooldown.should_skip_image(ctx):
+        _warn(ctx, "回响：发布冷却刚结束，本轮用纯文字试探，暂不生图")
+        image_on = False
     if image_on:
         try:
             draft.images = await create.generate_images(ctx, draft, image_count)

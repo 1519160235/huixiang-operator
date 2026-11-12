@@ -25,6 +25,7 @@ from pathlib import Path
 from typing import Any
 
 import media_upload
+from layers import cooldown
 from layers._cfg import read as _read, section as _section
 from models import (
     ActionState,
@@ -149,7 +150,13 @@ async def check_post_permission(ctx: Any) -> tuple[bool, str]:
     所以这里不再判断「权限」，只判断「这个发布类型能不能用」，
     并且永远返回「能发」——真正的失败由 `_explain_publish_error` 翻译成人话。
     保留这个函数是给调用方一个统一入口，将来真要加预检（比如风控状态）也在这里加。
+
+    【2026-11-12 真机事故】预检现在真的有了：平台回「发布功能暂不可用」时进入冷却，
+    冷却期内在这里直接拦下整轮。必须在生成文本和生图**之前**拦，否则图已经花钱画完了。
     """
+    blocked, why = cooldown.is_blocked(ctx)
+    if blocked:
+        return False, why
     return True, ""
 
 
@@ -276,14 +283,19 @@ async def publish_post(ctx: Any, draft: PostDraft, dry_run: bool = False) -> Pub
                     topic_ids_str=topic_ids_str,
                     hashtags=[],
                 )
+                cooldown.clear(ctx)
                 return PublishResult(
                     state=ActionState.SEND_UNKNOWN,
                     post_id=post_id,
                     note="已发出（话题未挂上），待回读核验",
                 )
             except Exception as retry_exc:  # noqa: BLE001
+                # 只在「最终要抛给调用方」时记一次，避免带话题重试把次数算成两次。
+                cooldown.record_rejection(ctx, str(retry_exc))
                 raise _explain_publish_error(retry_exc, topic_ids_str) from retry_exc
+        cooldown.record_rejection(ctx, str(exc))
         raise _explain_publish_error(exc, topic_ids_str) from exc
+    cooldown.clear(ctx)
     return PublishResult(
         state=ActionState.SEND_UNKNOWN,
         post_id=post_id,

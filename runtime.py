@@ -76,6 +76,12 @@ MODEL_PREFERENCE_PREFIXES: tuple[str, ...] = ("gemini", "glm", "claude", "gpt")
 # （life-frequency 插件里同款用法），这里给足 180 秒。
 DEFAULT_TIMEOUT_MS = 180_000
 
+# 首选模型失败后，后续兜底尝试的等待预算（毫秒）。
+# 【真机缺陷 2026-11-12】中转站 feiyu-gemini-flash 持续硬超时/返回空回复时，
+# 原本四次重试全给 180s，一轮互动最坏要卡 12 分钟，worker 直接堆积。
+# 兜底阶段换的是模型不是任务，不需要那么久；90s 足够宿主把 ds-official 跑完。
+FALLBACK_TIMEOUT_MS = 90_000
+
 
 class _Paths:
     """路径代理：同时提供 data_dir 与 state_dir（业务层两种叫法都认）。"""
@@ -143,33 +149,55 @@ class Runtime:
         # 配置名可能已下线/改名（中转站常态），先向宿主要真实可用列表做解析。
         model_name = await self._resolve_model_name(wanted) if wanted else ""
 
+        # 【真机缺陷 2026-11-12】原来的兜底只是**换任务名**，但每一轮都强制
+        # `model_name=首选模型`：中转站一超时，四次尝试打的是同一个模型，等于没有兜底。
+        # 线上实测 167 轮互动连续 ok=False，日志里全是
+        # 「模型 feiyu-gemini-flash 触发硬超时 120s / 返回空回复」「所有 1 个模型均尝试失败」。
+        #
+        # 修法：第一次仍按用户偏好直选（保持「不要 DeepSeek、用 GM」的配置语义），
+        # 一旦失败就**去掉 model_name**，宿主才会按各任务 model_list 的顺序回退
+        # （真实环境是 ["ds-official", "feiyu-gemini-flash"]，ds-official 排第一）。
+        # 换模型才是真兜底；换任务名只是顺带换一套 temperature / max_tokens。
+        attempts: list[tuple[str, str, int]] = [
+            (DEFAULT_MODEL_TASK, model_name, DEFAULT_TIMEOUT_MS),
+        ]
+        if model_name:
+            # 同任务、放开模型名：让宿主内部自己切到备用模型。
+            attempts.append((DEFAULT_MODEL_TASK, "", FALLBACK_TIMEOUT_MS))
+        # 最后一次换任务参数，兼容「任务配置本身有问题」的场景。
+        attempts.append(("utils", "", FALLBACK_TIMEOUT_MS))
+
         last_error: Exception | None = None
-        empty_tasks: list[str] = []
-        for task in FALLBACK_MODEL_TASKS:
-            kwargs: dict[str, Any] = {"task_name": task, "timeout_ms": DEFAULT_TIMEOUT_MS}
-            if model_name:
-                kwargs["model_name"] = model_name
+        empty_attempts: list[str] = []
+        for index, (task, use_model, timeout_ms) in enumerate(attempts):
+            kwargs: dict[str, Any] = {"task_name": task, "timeout_ms": timeout_ms}
+            if use_model:
+                kwargs["model_name"] = use_model
             if temperature is not None:
                 kwargs["temperature"] = temperature
             if max_tokens:
                 kwargs["max_tokens"] = max_tokens
+            if index > 0 and model_name:
+                self.logger.warning(
+                    "回响：首选模型 %s 生成失败，改走宿主默认模型链（任务 %s，不指定模型）",
+                    model_name, task,
+                )
             try:
                 result = await llm.generate(prompt, **kwargs)
-            except Exception as exc:  # noqa: BLE001 —— 换下一个任务名再试。
+            except Exception as exc:  # noqa: BLE001 —— 换下一个模型/任务再试。
                 last_error = exc
                 self.logger.debug("回响：模型任务 %s 调用失败，换下一个：%s", task, exc)
                 continue
             text = _extract_text(result)
             if text.strip():
                 return text
-            empty_tasks.append(task)
+            empty_attempts.append(f"{task}/{use_model or '默认'}")
         if last_error is not None:
             raise last_error
         # 宿主在某些失败场景下不抛异常、只回一个空结果（真机实测：任务名不存在时就是这样）。
         # 这里必须显式报错，否则上层只会看到「生成 0 字」，误判成模型话少。
         raise RuntimeError(
-            f"宿主大模型未返回内容（已尝试任务：{'、'.join(empty_tasks) or '无'}，"
-            f"模型：{model_name or '跟随任务默认'}）。"
+            f"宿主大模型未返回内容（已尝试：{'、'.join(empty_attempts) or '无'}）。"
             "请检查 model_config.toml 里这些任务的 model_list 是否配了可用模型。"
         )
 
