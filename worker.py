@@ -120,6 +120,13 @@ class OpsWorker:
         from state import now_iso
 
         self.mode = self._current_mode()
+        # 先把「需要人处理」的告警推出去（平台限制 / 登录失效 / 签名过期）。
+        try:
+            from layers import alert as _alert
+
+            await _alert.flush(self.ctx)
+        except Exception:  # noqa: BLE001 —— 通知失败不影响本轮
+            pass
 
         self.round_count += 1
         self.last_round_at = now_iso()
@@ -254,6 +261,14 @@ class OpsWorker:
 
     def _log(self, action: str, ok: bool, message: str, detail: dict | None = None) -> None:
         """写操作记录（失败不影响主流程）。"""
+        if not ok and "重新登录" in str(message or ""):
+            # 登录态失效同样需要人动手（扫码），单独告警一次。
+            try:
+                from layers import alert as _alert
+
+                _alert.record(self.ctx, "relogin", str(message or ""))
+            except Exception:  # noqa: BLE001
+                pass
         store = getattr(getattr(self.ctx, "store", None), "action_log", None)
         if store is None:
             return

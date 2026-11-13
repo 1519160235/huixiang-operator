@@ -46,6 +46,17 @@ PLATFORM_BLOCK_MARKERS: tuple[str, ...] = (
     "你的账号无法使用该功能",
     "无法使用该功能",
     "账号无法使用",
+    # 2026-11-12 App 通道固化签名失效 / 版本被淘汰时的服务端话术：
+    # 命中就该停下来重新抓包，别继续生成图片空烧钱。
+    "验证参数错误",
+    "非法请求",
+    "请升级至最新版本",
+    # 2026-11-12 20:30 实测：App 签名超过 300 秒后服务端固定回这一句，
+    # 说明手头没有可用签名了，必须停下来重新签，不能继续生成内容。
+    "请求失败了",
+    "App 兜底签名已过期",
+    "App 兜底签名",          # 前缀兜底：措辞改了也认得出是签名问题
+    "被平台限制",
 )
 
 # 限流单独走短冷却：等一会儿就好，不该按「平台坏了」退避几小时。
@@ -147,6 +158,12 @@ def record_rejection(ctx: Any, message: str, now: float | None = None) -> dict[s
         "cooldown_sec": seconds,
     }
     _write(ctx, state)
+    # 需要人动手的事件单独告警（30 分钟内同类只记一次）：
+    # 平台写限制 / 登录失效 / App 兜底签名过期，都不是插件自己能修的。
+    from layers import alert as _alert
+
+    kind_name = "signature" if "签名" in str(message or "") else kind
+    _alert.record(ctx, kind_name, str(message or ""), now=now)
     return state
 
 

@@ -462,6 +462,22 @@ class LinksConfig(PluginConfigBase):
     voice_broadcast: bool = B("顺便语音播报", "发帖后用语音插件念一句", False)
     qzone_sync: bool = B("同步到 QQ 空间", "同一条内容也发到 QQ 空间", False)
     diary_link: bool = B("记进日记", "把发帖这件事记到日记插件里", False)
+    serverchan_key: str = T(
+        "Server酱 SendKey",
+        "填了就用 Server 酱推送告警（如 SCTxxxxx）；留空则退回宿主私聊接口",
+        "",
+    )
+    serverchan_url: str = T(
+        "Server酱推送地址",
+        "默认 https://sctapi.ftqq.com/{key}.send；Server 酱³ 可换成自己的域名",
+        "https://sctapi.ftqq.com/{key}.send",
+    )
+    alert_api: str = T(
+        "告警推送接口",
+        "需要人处理时（平台限制 / 登录失效 / 签名过期）调用的宿主接口，"
+        "形如 插件ID.方法名；留空只写日志与 owner_alerts.jsonl",
+        "",
+    )
 
 
 class HuiXiangConfig(PluginConfigBase):

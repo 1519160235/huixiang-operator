@@ -24,6 +24,7 @@ import httpx
 
 from media_upload import UPLOAD_PATH, public_media_url
 from comment_signing import COMMENT_PATH, comment_query
+import app_protocol
 from vendor.api_client import (
     WEB_CLIENT_PARAMS,
     ApiResponse,
@@ -242,19 +243,51 @@ class CommunityClient(XiaoheiheApiClient):
         await self._limiter.wait()
         cookies = getattr(self.credentials, "cookies", {}) or {}
         heybox_id = str(cookies.get("heybox_id") or cookies.get("user_heybox_id") or "")
+        # 2026-11-12：web 写通道已恢复（同一探针从「你的账号无法使用该功能」
+        # 变回业务层校验），因此**默认走 web v16 签名**。
+        # App 通道保留为兜底：仅当 web 明确被账号级限制、且本地抓包签名对
+        # 还在有效期（≤4 分钟）时才切过去 —— 固化的签名只有 5 分钟寿命，
+        # 过期硬发只会拿到「请求失败了」。
+        web_headers = {
+            "Origin": "https://www.xiaoheihe.cn",
+            "Referer": "https://www.xiaoheihe.cn/",
+            "Content-Type": "application/x-www-form-urlencoded;charset=utf-8",
+        }
         try:
             response = await self._client.post(
                 "https://api.xiaoheihe.cn" + path,
                 params=comment_query(path=path, heybox_id=heybox_id),
                 data=form_body,
-                headers={
-                    "Origin": "https://www.xiaoheihe.cn",
-                    "Referer": "https://www.xiaoheihe.cn/",
-                    "Content-Type": "application/x-www-form-urlencoded;charset=utf-8",
-                },
+                headers=web_headers,
             )
         except httpx.HTTPError as exc:
             raise SendUncertainError(f"{operation}请求连接中断或超时", category="send_unknown") from exc
+        if response.status_code == 200:
+            try:
+                payload = response.json()
+            except ValueError:
+                payload = None
+            if isinstance(payload, dict):
+                error = _upstream_error(payload)
+                if (error and app_protocol.looks_blocked(error)
+                        and app_protocol.is_app_write(path)):
+                    if app_protocol.is_fresh(path):
+                        try:
+                            response = await self._client.post(
+                                app_protocol.app_url(path),
+                                data=app_protocol.convert_form(path, form_body),
+                                headers=app_protocol.app_headers(path),
+                            )
+                        except httpx.HTTPError as exc:
+                            raise SendUncertainError(
+                                f"{operation}请求连接中断或超时", category="send_unknown") from exc
+                    else:
+                        raise CommentRejectedError(
+                            f"{operation}被平台限制，且没有可用的 App 兜底签名"
+                            f"（现有签名 {app_protocol.pair_age(path)} 秒前抓的，"
+                            f"上限 {app_protocol.PAIR_TTL_SECONDS} 秒）。"
+                            "需要在装有模拟器的机器上跑 sign_farm.py 现场续签后再重试",
+                            category="platform_blocked")
         if response.status_code == 401:
             raise CredentialInvalidError(f"{operation}接口要求重新登录", category="credential_invalid")
         if response.status_code == 429:

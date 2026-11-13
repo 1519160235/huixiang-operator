@@ -1,7 +1,7 @@
 {
   "manifest_version": 2,
   "id": "local.huixiang-operator",
-  "version": "1.0.6",
+  "version": "1.1.0",
   "name": "回响",
   "description": "让 MaiBot 自己逛小黑盒：扫码登录、按分区发帖、评论互动、AI 配图，有想说的才发一条。默认演练模式，不开启不发帖。",
   "author": {
