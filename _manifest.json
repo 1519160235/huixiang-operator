@@ -1,9 +1,9 @@
 {
   "manifest_version": 2,
   "id": "local.huixiang-operator",
-  "version": "1.1.0",
+  "version": "1.1.1",
   "name": "回响",
-  "description": "让 MaiBot 自己逛小黑盒：扫码登录、按分区发帖、评论互动、AI 配图，有想说的才发一条。默认演练模式，不开启不发帖。",
+  "description": "让 MaiBot 替你逛小黑盒：刷帖、评论互动、按分区发帖配图，没什么想说的就不发。默认演练模式，确认后再开自动。",
   "author": {
     "name": "1519160235",
     "url": "https://github.com/1519160235"
@@ -67,5 +67,6 @@
       "value": "assets/icon.png",
       "fallback": "package"
     }
-  }
+  },
+  "changelog": "CHANGELOG.md"
 }
